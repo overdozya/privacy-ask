@@ -171,9 +171,23 @@ class Export(unittest.TestCase):
         cls.tmp.cleanup()
 
     def test_files_exist(self):
-        self.assertEqual(sorted(p.name for p in self.out.iterdir()),
-                         ["10_kb.sql", "20_packages.sql", "30_ledger.sql", "40_case_catalog.sql", "90_reset_cases.sql", "manifest.json"])
+        want = ["10_kb.sql", "20_packages.sql", "30_ledger.sql", "40_case_catalog.sql", "90_reset_cases.sql", "manifest.json"]
+        if (P.BUNDLE / "emb").is_dir():
+            want.insert(1, "15_kb_embeddings.sql")   # S10b: 안내서 벡터(build/emb/align_vectors.py)
+        self.assertEqual(sorted(p.name for p in self.out.iterdir()), want)
         self.assertEqual(json.loads((self.out / "manifest.json").read_text(encoding="utf-8")), self.m)
+
+    @unittest.skipUnless((P.BUNDLE / "emb").is_dir(), "확정 묶음 emb 없음")
+    def test_embeddings_in_manifest(self):
+        """S10b: export가 끝에 벡터 적재 파일을 쓰고 manifest에 그 칸을 남긴다(다시 export해도 빠지지 않음)."""
+        f = self.m["files"]["15_kb_embeddings.sql"]
+        self.assertEqual(f["after"], "10_kb.sql")
+        self.assertEqual(f["sha256"], hashlib.sha256((self.out / "15_kb_embeddings.sql").read_bytes()).hexdigest())
+        e = self.m["embeddings"]
+        guide = self.src["kb"].execute("SELECT COUNT(*) FROM kb_chunks c JOIN kb_documents d USING(doc_id) "
+                                       "WHERE d.source_type='GUIDE' AND c.chunk_key IS NOT NULL").fetchone()[0]
+        self.assertEqual(e["rows"], guide)
+        self.assertEqual(e["matched_bundle"] + e["new"], guide)
 
     def test_manifest_rows_equal_sqlite_rows(self):
         """완료 기준 2: manifest 행 수 = SQLite 행 수 = SQL 파일에서 다시 읽어 센 행 수."""

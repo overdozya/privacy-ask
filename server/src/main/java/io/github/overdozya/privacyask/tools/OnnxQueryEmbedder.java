@@ -68,7 +68,8 @@ public final class OnnxQueryEmbedder implements QueryEmbedder, AutoCloseable {
                     System.setProperty("ai.djl.offline", "true");   // 토크나이저 네이티브는 jar 안의 것만(내려받지 않음)
                     HuggingFaceTokenizer tok = HuggingFaceTokenizer.newInstance(dir.resolve(TOKENIZER), Map.of(
                             "addSpecialTokens", "true", "truncation", "true", "maxLength", String.valueOf(MAX_LEN),
-                            "padding", "false"));
+                            // tokenizer_config의 model_max_length가 없으면 DJL이 512로 깎는다(S10b 기동 로그) → 문서 벡터와 같게 1024
+                            "modelMaxLength", String.valueOf(MAX_LEN), "padding", "false"));
                     OrtEnvironment env = OrtEnvironment.getEnvironment();
                     OrtSession.SessionOptions so = new OrtSession.SessionOptions();
                     OrtSession s = env.createSession(dir.resolve(MODEL).toString(), so);

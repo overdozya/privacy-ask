@@ -2,8 +2,11 @@
 
 입력(읽기 전용): data/out/의 db/privacyask.db(D1~D7), ledger/ledger.db(D8), case/case.db(D9 기준표 5개 + 규칙 3테이블)
 출력: data/out/mysql/10_kb.sql, 20_packages.sql, 30_ledger.sql, 40_case_catalog.sql, manifest.json,
-      90_reset_cases.sql(개발용: 사안 기록 D9만 비움. 기준표를 다시 넣기 전에 돌린다, 06 2.5)
-받는 스키마: server/의 Flyway V1~V4(06 2.1). MySQL은 띄우지 않는다. 순서: 빈 DB에 서버를 한 번 띄움 → 10·20·30·40 순.
+      90_reset_cases.sql(개발용: 사안 기록 D9만 비움. 기준표를 다시 넣기 전에 돌린다, 06 2.5),
+      15_kb_embeddings.sql(S10b: 안내서 청크 벡터. 끝에 build/emb/align_vectors.py를 불러 manifest에 그 칸까지 쓴다.
+      확정 묶음 emb가 없으면 건너뛴다. 새로 임베딩할 청크가 있으면 멈추고 venv로 align_vectors.py --allow-new를 돌리라고 알린다)
+받는 스키마: server/의 Flyway V1~V4(06 2.1). MySQL은 띄우지 않는다. 순서: 빈 DB에 서버를 한 번 띄움 → 10·15·20·30·40 순
+(server/scripts/load-data.sh).
 
 형식(06 3.3): SET NAMES → START TRANSACTION → 자기 테이블 DELETE(자식 먼저) → INSERT … VALUES (500행·1MB씩) → COMMIT
 → 끝에 행 수 확인 SELECT. LOAD DATA·CSV를 쓰지 않는다. 같은 입력이면 바이트까지 같은 파일(시각·경로 없음).
@@ -251,7 +254,20 @@ def max_chars(cols, rows):
     return out
 
 
-def export(kb=KB_DB, ledger=LEDGER_DB, case=CASE_DB, out=OUT):
+def attach_embeddings(kb, out):
+    """S10b: 15_kb_embeddings.sql + manifest 칸(build/emb/align_vectors.py). 확정 묶음 emb가 없으면 None(건너뜀)."""
+    sys.path.insert(0, str(HERE.parent / "emb"))
+    import align_vectors as A  # noqa: E402
+    import emb_common as EC  # noqa: E402
+    if not EC.EMB_DIR.is_dir():
+        print(f"안내서 벡터 건너뜀: 확정 묶음 emb 없음({EC.EMB_DIR})")
+        return None
+    report_path = EC.EMB_REPORT if Path(out).resolve() == Path(OUT).resolve() else None
+    report, _ = A.run(db=Path(kb), out=Path(out), report_path=report_path, allow_new=False)
+    return report
+
+
+def export(kb=KB_DB, ledger=LEDGER_DB, case=CASE_DB, out=OUT, embeddings=True):
     srcs = {"kb": Path(kb), "ledger": Path(ledger), "case": Path(case)}
     cons = {k: open_ro(p) for k, p in srcs.items()}
     try:
@@ -289,6 +305,8 @@ def export(kb=KB_DB, ledger=LEDGER_DB, case=CASE_DB, out=OUT):
         manifest["reset"] = {RESET_FILE: {"sha256": hashlib.sha256(rb).hexdigest(), "bytes": len(rb), "tables": RESET_TABLES}}
         (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
                                            encoding="utf-8", newline="\n")
+        if embeddings and attach_embeddings(srcs["kb"], out) is not None:
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         return manifest
     finally:
         for c in cons.values():
@@ -304,6 +322,9 @@ def main():
     a = ap.parse_args()
     m = export(a.kb, a.ledger, a.case, a.out)
     for name, f in m["files"].items():
+        if name not in {x[0] for x in FILES}:
+            print(f"{name}: {f['bytes']:,}바이트")
+            continue
         n = sum(m["tables"][t]["rows"] for t in f["tables"])
         print(f"{name}: {n}행, {f['bytes']:,}바이트")
     print(f"합계 {m['total_rows']}행 → {a.out}")

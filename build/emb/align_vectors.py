@@ -175,8 +175,9 @@ def run(db=P.KB_DB, out=P.MYSQL_OUT, report_path=C.EMB_REPORT, allow_new=False):
     out.mkdir(parents=True, exist_ok=True)
     (out / C.EMB_SQL).write_bytes(sql)
     update_manifest(out / "manifest.json", sql, report)
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    if report_path is not None:   # None = 보고를 쓰지 않음(다른 출력 폴더로 export할 때)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return report, sql
 
 
