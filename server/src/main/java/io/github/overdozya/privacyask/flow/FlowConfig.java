@@ -59,10 +59,14 @@ public class FlowConfig {
                             CodeVersion code, FlowProperties props, TurnLogWriter turnLogs, JsonMapper json,
                             io.github.overdozya.privacyask.packages.PackageService packages,
                             io.github.overdozya.privacyask.answer.SpecificAnswerStep specific,
-                            io.github.overdozya.privacyask.answer.GeneralAnswerStep general) {
+                            io.github.overdozya.privacyask.answer.GeneralAnswerStep general,
+                            io.github.overdozya.privacyask.verify.ReviewSummaryStep summary,
+                            io.github.overdozya.privacyask.verify.JudgmentRecorder recorder,
+                            io.github.overdozya.privacyask.verify.JudgmentReader judgmentReader) {
         return new TurnService(store, reader, lock, jdbc, knowledge, intake, facts, answers, baseline, watch, judges,
                 questions, clock, code, props, turnLogs, FLOW_EXECUTOR, json,
-                new TurnService.AnswerStages(packages, specific, general));
+                new TurnService.AnswerStages(packages, specific, general),
+                new TurnService.VerifyStages(summary, recorder, judgmentReader));
     }
 
     @Bean

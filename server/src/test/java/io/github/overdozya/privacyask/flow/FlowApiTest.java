@@ -107,7 +107,10 @@ class FlowApiTest {
                         + "\"reason\":\"위탁 계약서에 무엇을 적는지 묻는 일반 질문\"}"));
         routes.put("A5_general_answer", r -> FakeProvider.ok(
                 "{\"answer\":\"손으로 쓴 답 문장.\",\"cites\":[\"개인정보보호법|26|\"]}"));
+        routes.put("A7_summary", r -> FakeProvider.ok(SUMMARY));
     }
+
+    static final String SUMMARY = "{\"summary\":[\"손으로 쓴 요지 첫 줄\",\"손으로 쓴 요지 둘째 줄\"]}";
 
     /** S8 A5 손 출력: 넘긴 흐름·쟁점마다 첫 원문 키를 인용하고, 그 흐름 원장 대조의 첫 행을 단다(conclusive는 인자). 받은 입력대로 짓는다. */
     static String answerFromInput(ProviderRequest r, boolean conclusive) {
@@ -247,8 +250,66 @@ class FlowApiTest {
 
     // ───────── ① 예시 사안 끝까지 ─────────
 
+    /**
+     * S9: 예시 사안의 A5 출력(재현표 판정의 쟁점 의견·조치·인용 = case.db case_judgment_issues·citations)을 지금 스키마 꼴로.
+     * 쟁점은 모두 확정(재현표 conclusive 1), gap 없음.
+     */
+    static final List<String> EXAMPLE_DROPPED = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** 받은 A5 입력의 그 쟁점 키 안에 있는 예시 인용만 남긴다(지금 꾸러미에 없는 예시 키는 EXAMPLE_DROPPED에). */
+    static String exampleAnswer(ProviderRequest r) {
+        JsonNode in = JSON.readTree(r.user().split("\n\n\\[다시 요청]")[0]);
+        Map<String, java.util.Set<String>> keys = new LinkedHashMap<>();
+        for (JsonNode f : in.get("flows")) {
+            for (JsonNode i : f.get("issues")) {
+                java.util.Set<String> ks = new java.util.LinkedHashSet<>();
+                i.get("keys").forEach(k -> ks.add(k.get("key").asString()));
+                keys.put(f.get("flow").asInt() + "|" + i.get("issue").asString(), ks);
+            }
+        }
+        JsonNode full = JSON.readTree(exampleAnswer());
+        EXAMPLE_DROPPED.clear();
+        for (JsonNode i : full.get("issues")) {
+            java.util.Set<String> ks = keys.getOrDefault(i.get("flow").asInt() + "|" + i.get("issue").asString(), java.util.Set.of());
+            ArrayNode cites = (ArrayNode) i.get("cites");
+            for (int n = cites.size() - 1; n >= 0; n--) {
+                if (!ks.contains(cites.get(n).asString())) {
+                    EXAMPLE_DROPPED.add(i.get("flow").asInt() + "|" + i.get("issue").asString() + "|" + cites.get(n).asString());
+                    cites.remove(n);
+                }
+            }
+        }
+        return full.toString();
+    }
+
+    static String exampleAnswer() {
+        ObjectNode out = JSON.createObjectNode();
+        ArrayNode issues = out.putArray("issues");
+        for (JsonNode i : ExampleCaseDb.query("SELECT issue_row_id, flow_no, issue_name, opinion, actions "
+                + "FROM case_judgment_issues ORDER BY issue_row_id")) {
+            ObjectNode o = issues.addObject();
+            o.put("flow", i.get("flow_no").asInt());
+            o.put("issue", i.get("issue_name").asString());
+            o.put("opinion", i.get("opinion").asString());
+            ArrayNode acts = o.putArray("actions");
+            String a = i.path("actions").asString("");
+            if (!a.isBlank()) {
+                acts.add(a.replaceFirst("^- ", ""));
+            }
+            ArrayNode cites = o.putArray("cites"), rows = o.putArray("ledger_rows");
+            for (JsonNode c : ExampleCaseDb.query("SELECT cite_kind, cite_key FROM case_judgment_citations WHERE issue_row_id="
+                    + i.get("issue_row_id").asInt() + " ORDER BY ord")) {
+                ("LEDGER_ROW".equals(c.get("cite_kind").asString()) ? rows : cites).add(c.get("cite_key").asString());
+            }
+            o.put("conclusive", true);
+        }
+        out.putArray("gaps");
+        return out.toString();
+    }
+
     @Test
     void exampleCaseEndToEndMatchesReplay() throws Exception {
+        routes.put("A5_answer", r -> FakeProvider.ok(exampleAnswer(r)));
         Map<String, String> answers = Map.of("1:F-T4", "아니오", "1:F-C2", "잘 모르겠음", "2:F-C2", "아니오",
                 "2:F-B3", "앞으로 받을 예정");
         Res r = create();
@@ -272,7 +333,8 @@ class FlowApiTest {
         assertThat(asked).containsExactly("1:F-C2#1", "1:F-C2#2", "2:F-C2#1", "2:F-B3#1", "1:F-T4#1");
         assertThat(r.body().get("outcome").asString()).isEqualTo("RESULT");
         JsonNode res = r.body().get("result");
-        assertThat(res.get("preliminary").asBoolean()).isTrue();
+        assertThat(res.get("preliminary").asBoolean()).isFalse();   // S9: A7 최종 출구 + A8 판정 테이블
+        assertThat(r.body().get("state").asString()).isEqualTo("TRANSFERRED");
 
         // 슬롯(상태·값·미확인·근거 사실 집합)·쟁점·등급·출구 = 재현표
         for (int n : ExampleCaseDb.flowNos()) {
@@ -309,8 +371,13 @@ class FlowApiTest {
         JsonNode j = ExampleCaseDb.judgment();
         assertThat(res.get("case_grade").asString()).isEqualTo(j.get("case_grade").asString()).isEqualTo("H");
         assertThat(res.get("exit_type").asString()).isEqualTo(j.get("exit_type").asString()).isEqualTo("TRANSFER");
-        assertThat(res.get("exit_reasons").toString())
-                .isEqualTo("[{\"code\":\"REQUESTER_UNKNOWN\",\"flow\":1,\"detail\":\"cross_border: F-C2\"}]");
+        // S9 최종 사유: 예비 사유(현업 미확인) + 출구 정책(H → TRANSFER). 쟁점이 모두 확정이라 NOT_CONCLUSIVE 없음
+        assertThat(res.get("exit_reasons").toString()).isEqualTo("[{\"code\":\"REQUESTER_UNKNOWN\",\"flow\":1,"
+                + "\"detail\":\"cross_border: F-C2\"},{\"code\":\"GRADE_POLICY\",\"flow\":null,\"detail\":\"exit_policy[H] = TRANSFER\"}]");
+        assertThat(res.get("conclusive").asBoolean()).isFalse();   // 재현표 conclusive 0(흐름 1 cross_border 미확인)
+        assertThat(Condition.strings(res.get("summary"))).containsExactly("손으로 쓴 요지 첫 줄", "손으로 쓴 요지 둘째 줄");
+        assertThat(res.get("verify").get("problems")).isEmpty();
+        assertJudgmentMatchesReplay(id, res.get("judgment_id").asLong());
         assertThat(res.get("watch_flag").asBoolean()).isFalse();
         assertThat(res.get("unasked")).isEmpty();
         // S8 ⑤: 답(A5)이 붙음. 쟁점 5개마다 의견·인용(꾸러미 원문 키), 원문 요약은 코드가 붙임. 기준일 = 예시 F-S3 2026-12-01
@@ -324,7 +391,7 @@ class FlowApiTest {
         assertThat(ans.get("sources").size()).isPositive();
         assertThat(ans.get("sources")).allSatisfy(x -> assertThat(x.get("text_hash").asString()).isNotBlank());
         assertThat(ans.get("ledger_rows").get(0).get("row_id").asString()).isEqualTo("첨부1-0040");
-        assertThat(ans.get("conclusive").asBoolean()).isFalse();
+        assertThat(ans.get("conclusive").asBoolean()).isTrue();
         assertThat(jdbc.sql("SELECT COUNT(*) FROM steps WHERE case_id=? AND step='A4' AND name='꾸러미 열기'").param(id)
                 .query(Long.class).single()).isEqualTo(1L);
 
@@ -363,8 +430,8 @@ class FlowApiTest {
             assertThat(logs.get(i)).containsEntry("request_kind", "ANSWER").containsEntry("llm_calls", 0)
                     .containsEntry("llm_depth", 0);
         }
-        // S8: 마지막 답 = 감시 1 + A5 답변 1(직렬)
-        assertThat(logs.get(5)).containsEntry("llm_calls", 2).containsEntry("llm_depth", 2)
+        // S8: 마지막 답 = 감시 1 + A5 답변 1(직렬), S9: + A7 검토자 요지 1(이관)
+        assertThat(logs.get(5)).containsEntry("llm_calls", 3).containsEntry("llm_depth", 3)
                 .containsEntry("result_code", "OK_RESULT");
         assertThat(logs).allSatisfy(l -> assertThat(((Number) l.get("db_statements")).intValue()).isPositive());
         assertThat(jdbc.sql("SELECT COUNT(*) FROM llm_call_logs WHERE case_id=? AND (step_seq IS NULL OR discarded=1)")
@@ -377,6 +444,103 @@ class FlowApiTest {
         assertThat(again.body().get("result")).isEqualTo(res);
         assertThat(jdbc.sql("SELECT COUNT(*) FROM steps WHERE case_id=?").param(id).query(Long.class).single())
                 .isEqualTo(steps);
+        // API 4 last도 판정 테이블의 결과
+        assertThat(get("/api/cases/" + id).body().get("last").get("result")).isEqualTo(res);
+        // 닫힌 사안에 답 → 409 NOT_ASKING
+        Res closed = post("/api/cases/" + id + "/answers", answer(9, "아니오"));
+        assertThat(closed.status()).isEqualTo(409);
+        assertThat(closed.body().get("code").asString()).isEqualTo("NOT_ASKING");
+    }
+
+    /** S9 ①: 판정 행(슬롯·값·미확인·근거 사실, 쟁점, 인용) = 재현표(case.db). 근거 사실의 원장 L2~L4는 지금 기준선만 더 적는다(S7). */
+    static void assertJudgmentMatchesReplay(String id, long jid) {
+        JsonNode want = ExampleCaseDb.query("SELECT * FROM case_judgments ORDER BY judgment_id DESC LIMIT 1").get(0);
+        Map<String, Object> j = jdbc.sql("SELECT * FROM case_judgments WHERE judgment_id=?").param(jid).query().singleRow();
+        assertThat(j.get("case_id")).isEqualTo(id);
+        assertThat(j.get("case_grade")).isEqualTo(want.get("case_grade").asString());
+        assertThat(j.get("exit_type")).isEqualTo(want.get("exit_type").asString());
+        assertThat(String.valueOf(j.get("reference_date"))).isEqualTo(want.get("reference_date").asString());
+        assertThat(j.get("rule_set_version")).isEqualTo(want.get("rule_set_version").asString());
+        assertThat(j.get("package_version")).isEqualTo(want.get("package_version").asString());
+        assertThat(j.get("ledger_version")).isEqualTo(want.get("ledger_version").asString());
+        assertThat(Boolean.TRUE.equals(j.get("conclusive")) || j.get("conclusive") instanceof Number n && n.intValue() != 0 ? 1 : 0).isEqualTo(want.get("conclusive").asInt());
+        assertThat(String.valueOf(j.get("judged_turn"))).isEqualTo(want.get("judged_turn").asString());
+        JsonNode bundle = JSON.readTree(String.valueOf(j.get("review_bundle")));
+        assertThat(bundle.get("exit_reasons").toString()).contains("REQUESTER_UNKNOWN");
+        assertThat(Condition.strings(bundle.get("summary"))).hasSize(2);
+        assertThat(jdbc.sql("SELECT state FROM cases WHERE case_id=?").param(id).query(String.class).single())
+                .isEqualTo("TRANSFERRED");
+        // 슬롯
+        List<String> mine = new ArrayList<>(), theirs = new ArrayList<>();
+        for (Map<String, Object> x : jdbc.sql("""
+                SELECT s.flow_no, s.slot_key, s.status, s.unknown_facts,
+                  (SELECT JSON_ARRAYAGG(v.value) FROM case_judgment_slot_values v WHERE v.judgment_id=s.judgment_id
+                     AND v.flow_no=s.flow_no AND v.slot_key=s.slot_key) AS vals,
+                  (SELECT JSON_ARRAYAGG(f.fact_id) FROM facts f WHERE JSON_CONTAINS(s.basis_facts, CAST(f.fact_row_id AS JSON))
+                     AND f.fact_id NOT IN ('L2','L3','L4')) AS basis
+                FROM case_judgment_slots s WHERE s.judgment_id=? ORDER BY s.flow_no, s.slot_key""").param(jid).query()
+                .listOfRows()) {
+            mine.add(x.get("flow_no") + " " + x.get("slot_key") + " " + x.get("status") + " "
+                    + sorted(x.get("vals")) + " " + sorted(x.get("unknown_facts")) + " " + sorted(x.get("basis")));
+        }
+        for (JsonNode x : ExampleCaseDb.query("""
+                SELECT s.flow_no, s.slot_key, s.status, s.unknown_facts,
+                  (SELECT json_group_array(value) FROM case_judgment_slot_values v WHERE v.judgment_id=s.judgment_id
+                     AND v.flow_no=s.flow_no AND v.slot_key=s.slot_key) AS vals,
+                  (SELECT json_group_array(f.fact_id) FROM facts f, json_each(s.basis_facts) b WHERE f.fact_row_id=b.value) AS basis
+                FROM case_judgment_slots s ORDER BY s.flow_no, s.slot_key""")) {
+            theirs.add(x.get("flow_no").asInt() + " " + x.get("slot_key").asString() + " " + x.get("status").asString() + " "
+                    + sorted(x.get("vals").asString()) + " " + sorted(x.get("unknown_facts").asString()) + " "
+                    + sorted(x.get("basis").asString()));
+        }
+        assertThat(mine).as("판정 슬롯").isEqualTo(theirs);
+        // 쟁점(의견·조치는 예시 A5 출력을 옮긴 것)
+        List<String> mi = jdbc.sql("""
+                SELECT CONCAT_WS(' | ', flow_no, issue_name, package_id, grade, rule_ids, conditions, interp_flags, conclusive,
+                  opinion, COALESCE(actions,'')) FROM case_judgment_issues WHERE judgment_id=? ORDER BY issue_row_id""")
+                .param(jid).query(String.class).list();
+        List<String> ti = new ArrayList<>();
+        for (JsonNode x : ExampleCaseDb.query("SELECT * FROM case_judgment_issues ORDER BY issue_row_id")) {
+            ti.add(String.join(" | ", x.get("flow_no").asString(), x.get("issue_name").asString(),
+                    x.get("package_id").asString(), x.get("grade").asString(), compact(x.get("rule_ids").asString()),
+                    compact(x.get("conditions").asString()), compact(x.get("interp_flags").asString()),
+                    x.get("conclusive").asString(), x.get("opinion").asString(), x.path("actions").asString("")));
+        }
+        assertThat(mi.stream().map(FlowApiTest::compact).toList()).as("판정 쟁점")
+                .isEqualTo(ti.stream().map(FlowApiTest::compact).toList());
+        // 인용(쟁점 번호·종류·키·해시·처리방침 판·출처)
+        List<String> mc = jdbc.sql("""
+                SELECT CONCAT_WS(' ', i.flow_no, i.issue_name, c.cite_kind, c.cite_key, c.text_hash, COALESCE(c.ledger_version,'-'),
+                  c.origin) FROM case_judgment_citations c JOIN case_judgment_issues i ON i.issue_row_id=c.issue_row_id
+                WHERE c.judgment_id=? ORDER BY c.ord""").param(jid).query(String.class).list();
+        List<String> tc = new ArrayList<>();
+        System.out.println("S9 예시 인용 중 지금 꾸러미(그 쟁점 키) 밖이라 뺀 것: " + EXAMPLE_DROPPED);
+        for (JsonNode x : ExampleCaseDb.query("""
+                SELECT i.flow_no, i.issue_name, c.cite_kind, c.cite_key, c.text_hash, c.ledger_version, c.origin
+                FROM case_judgment_citations c JOIN case_judgment_issues i ON i.issue_row_id=c.issue_row_id ORDER BY c.ord""")) {
+            if (EXAMPLE_DROPPED.contains(x.get("flow_no").asInt() + "|" + x.get("issue_name").asString() + "|"
+                    + x.get("cite_key").asString())) {
+                continue;
+            }
+            tc.add(String.join(" ", x.get("flow_no").asString(), x.get("issue_name").asString(), x.get("cite_kind").asString(),
+                    x.get("cite_key").asString(), x.get("text_hash").asString(),
+                    x.get("ledger_version").isNull() ? "-" : x.get("ledger_version").asString(), x.get("origin").asString()));
+        }
+        assertThat(mc).as("판정 인용").isEqualTo(tc);
+        System.out.println("S9 예시 사안 판정 " + jid + ": 슬롯 " + mine.size() + " · 쟁점 " + mi.size() + " · 인용 " + mc.size());
+    }
+
+    static String compact(String s) {
+        return s.replace(", ", ",").replace("\" ", "\"");
+    }
+
+    static List<String> sorted(Object jsonArray) {
+        if (jsonArray == null) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>(Condition.strings(JSON.readTree(String.valueOf(jsonArray))));
+        java.util.Collections.sort(out);
+        return out;
     }
 
     /** LLM 없는 턴(보기 답, 질문이 남음)의 서버 시간 p95(06 6.1 목표 300 ms): 예시 사안 가운데 답 턴을 여러 사안으로 모아 잰다. */
@@ -507,7 +671,7 @@ class FlowApiTest {
         Res r = create();
         assertThat(r.status()).isEqualTo(200);
         assertThat(r.body().get("outcome").asString()).isEqualTo("GENERAL");
-        assertThat(r.body().get("state").asString()).isEqualTo("ASKING");
+        assertThat(r.body().get("state").asString()).isEqualTo("JUDGED");   // S9: 즉답(ANSWER) → A8이 닫음
         String id = r.body().get("case_id").asString();
         long discarded = 0;
         for (int i = 0; i < 50 && discarded == 0; i++) {   // 버린 A1은 응답 뒤에 끝날 수 있다
@@ -518,8 +682,10 @@ class FlowApiTest {
         assertThat(discarded).isEqualTo(1L);
         assertThat(jdbc.sql("SELECT COUNT(*) FROM steps WHERE case_id=? AND step='A1'").param(id).query(Long.class)
                 .single()).isZero();
-        // S8: A0 → A5 일반(G2) → (S8b) 답 문장 직렬. 결과는 고른 조의 원문(코드가 붙임) + 답 문장
+        // S8: A0 → A5 일반(G2) → (S8b) 답 문장 직렬. 결과는 고른 조의 원문(코드가 붙임) + 답 문장. S9: 즉답이라 요지 LLM 없음
         assertThat(r.body().get("timing").get("llm_depth").asInt()).isEqualTo(3);
+        assertThat(r.body().get("result").get("preliminary").asBoolean()).isFalse();
+        assertThat(r.body().get("result").get("summary").isNull()).isTrue();
         JsonNode ans = r.body().get("result").get("answer");
         assertThat(ans.get("kind").asString()).isEqualTo("GENERAL");
         assertThat(ans.get("picks").get(0).get("key").asString()).isEqualTo("개인정보보호법|26|");

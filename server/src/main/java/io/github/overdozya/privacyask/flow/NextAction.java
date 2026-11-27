@@ -44,6 +44,10 @@ public enum NextAction {
     A5_GENERAL,
     /** 일반 질의 답 문장(LLM, S8b): 고른 조 원문만 보고 2~4문장. */
     A5_GENERAL_TEXT,
+    /** 인용 검증·최종 출구·검토 요청 묶음(코드, S9). */
+    A7,
+    /** 판정 기록(코드, S9): 이관이면 먼저 검토자 요지(A7 LLM)를 쓰고, 판정 테이블에 저장한 뒤 사안을 닫는다(JUDGED·TRANSFERRED). */
+    A8,
     END_GENERAL, END_TRANSFERRED, END_QUESTION, END_RESULT;
 
     public static final String A2_NAME = "다음 질문 고르기";
@@ -52,6 +56,8 @@ public enum NextAction {
     public static final String A4_NAME = "꾸러미 열기";
     /** A5 사실 부족 gap을 A2 후보로 다시 묻는 질문 단계(A2_NAME과 다른 이름: 같은 입력 안에서 늦은 저장 검사가 겹치지 않게). */
     public static final String A2_GAP_NAME = "답변 뒤 질문";
+    public static final String A7_NAME = "인용 검증·출구";
+    public static final String A8_NAME = "판정 기록";
 
     public boolean ends() {
         return name().startsWith("END_");
@@ -60,6 +66,9 @@ public enum NextAction {
     public static NextAction decide(CaseState st, BaselineStep baseline) {
         CaseState.CaseRow c = st.caseRow();
         if (!"ASKING".equals(c.state())) {
+            if (judged(st)) {
+                return IntakeJudge.GENERAL.equals(c.intakeType()) ? END_GENERAL : END_RESULT;
+            }
             return END_TRANSFERRED;
         }
         if (c.intakeType() == null) {
@@ -75,7 +84,7 @@ public enum NextAction {
             if (!st.doneSinceInput(GeneralAnswerStep.STEP, GeneralAnswerStep.NAME_TEXT, null)) {
                 return A5_GENERAL_TEXT;
             }
-            return END_GENERAL;
+            return verifyAndRecord(st, END_GENERAL);
         }
         Optional<CaseState.Turn> user = st.lastUserTurn();
         if (user.isEmpty()) {
@@ -116,7 +125,23 @@ public enum NextAction {
         if (!st.doneSinceInput(SpecificAnswerStep.STEP, SpecificAnswerStep.NAME, null)) {
             return A5_SPECIFIC;
         }
-        return END_RESULT;
+        return verifyAndRecord(st, END_RESULT);
+    }
+
+    /** A5 뒤(S9): A7 → A8 → 끝. */
+    static NextAction verifyAndRecord(CaseState st, NextAction end) {
+        if (!st.doneSinceInput("A7", A7_NAME, null)) {
+            return A7;
+        }
+        if (!st.doneSinceInput("A8", A8_NAME, null)) {
+            return A8;
+        }
+        return end;
+    }
+
+    /** 판정 기록(A8)이 있는 사안(닫힌 뒤 API 3·4는 판정 테이블의 결과를 그대로 낸다). */
+    static boolean judged(CaseState st) {
+        return st.steps().stream().anyMatch(s -> "A8".equals(s.step()) && A8_NAME.equals(s.name()) && s.ok());
     }
 
     /**

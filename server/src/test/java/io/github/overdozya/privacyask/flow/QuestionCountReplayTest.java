@@ -81,7 +81,7 @@ class QuestionCountReplayTest {
                     case "A0_intake" -> FakeProvider.ok("{\"signals\":[{\"kind\":\"OWN_CASE\",\"quote\":\"T 멤버십 회원에게\"}]}");
                     case "A1_facts" -> FakeProvider.ok(exA1);
                     case "A3_ledger" -> FlowApiTest.ledgerCites(r);
-                    case "A5_answer", "A5_general", "A5_general_answer" -> a5(r);
+                    case "A5_answer", "A5_general", "A5_general_answer", "A7_summary" -> a5(r);
                     default -> FakeProvider.ok("{\"flags\":[]}");
                 });
                 rows.put("예시 사안", run(exContent, null, null, Map.of("1:F-T4", "아니오", "1:F-C2", "잘 모르겠음",
@@ -120,6 +120,7 @@ class QuestionCountReplayTest {
             case "A5_answer" -> FakeProvider.ok(FlowApiTest.answerFromInput(r, false));
             case "A5_general" -> FakeProvider.ok("{\"picks\":[{\"key\":\"개인정보보호법|26|\",\"why\":\"위탁\"}],"
                     + "\"no_basis\":false,\"reason\":\"재생 손 출력\"}");
+            case "A7_summary" -> FakeProvider.ok(FlowApiTest.SUMMARY);
             default -> FakeProvider.ok("{\"answer\":\"재생 손 출력.\",\"cites\":[\"개인정보보호법|26|\"]}");
         };
     }
@@ -173,7 +174,7 @@ class QuestionCountReplayTest {
                 }
                 yield FakeProvider.ok(out.toString());
             }
-            case "A5_answer", "A5_general", "A5_general_answer" -> a5(r);   // S8b: 답은 질문 수와 무관, 손 출력
+            case "A5_answer", "A5_general", "A5_general_answer", "A7_summary" -> a5(r);   // S8b: 답은 질문 수와 무관, 손 출력
             default -> FakeProvider.ok("{\"flags\":[]}");   // 감시는 질문 수와 무관: 표시 없음으로(저장한 표시는 그때 쟁점 기준)
         };
     }

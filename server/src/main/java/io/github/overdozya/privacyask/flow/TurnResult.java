@@ -29,9 +29,17 @@ public record TurnResult(String caseId, String state, String outcome, Intake int
      * unasked: 질문 상한으로 묻지 않은 후보("흐름:사실", S7b). 답에 따라 쟁점·조건은 바뀔 수 있으나 사안 등급·출구는 안 바뀐다.
      * answer: A5 답(S8, 쟁점별 의견·조치·인용 키와 코드가 붙인 원문 요약·conclusive·gap). 답이 더한 이관 사유는 exitReasons에도 들어가고
      * 그러면 exitType은 TRANSFER. 일반 문의(GENERAL)는 caseGrade·flows가 비고 answer만 있다.
+     * S9 최종 결과(A7·A8 뒤, 판정 테이블에서 읽음): preliminary false, exitType·exitReasons = A7 최종 출구(ExitAssembler 사유 코드),
+     * judgmentId = case_judgments 행, conclusive = 사안 결론 확정, summary = 이관이면 검토자 요지(A7_summary), verify = 인용 검증 요약.
      */
     public record Result(boolean preliminary, String caseGrade, String exitType, List<Reason> exitReasons,
-                         boolean watchFlag, List<FlowResult> flows, List<String> unasked, Answer answer) {
+                         boolean watchFlag, List<FlowResult> flows, List<String> unasked, Answer answer,
+                         Long judgmentId, Boolean conclusive, List<String> summary, Object verify) {
+
+        public Result(boolean preliminary, String caseGrade, String exitType, List<Reason> exitReasons,
+                      boolean watchFlag, List<FlowResult> flows, List<String> unasked, Answer answer) {
+            this(preliminary, caseGrade, exitType, exitReasons, watchFlag, flows, unasked, answer, null, null, null, null);
+        }
 
         /** 예비 결과에 답을 붙인다: 답의 이관 사유를 더하고, 사유가 생기면 TRANSFER. */
         public Result withAnswer(Answer a) {

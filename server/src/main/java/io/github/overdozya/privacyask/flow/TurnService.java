@@ -57,6 +57,13 @@ import io.github.overdozya.privacyask.record.CaseStore;
 import io.github.overdozya.privacyask.record.Rejected;
 import io.github.overdozya.privacyask.record.TurnConflict;
 import io.github.overdozya.privacyask.watch.OmissionWatchStep;
+import io.github.overdozya.privacyask.rules.ExitPolicy;
+import io.github.overdozya.privacyask.verify.CitationVerifier;
+import io.github.overdozya.privacyask.verify.ExitAssembler;
+import io.github.overdozya.privacyask.verify.JudgmentReader;
+import io.github.overdozya.privacyask.verify.JudgmentRecorder;
+import io.github.overdozya.privacyask.verify.ReviewBundleBuilder;
+import io.github.overdozya.privacyask.verify.ReviewSummaryStep;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -98,11 +105,17 @@ public class TurnService {
         }
     }
 
+    /** S9: A7 검토자 요지·A8 판정 기록·판정 읽기. */
+    public record VerifyStages(ReviewSummaryStep summary, JudgmentRecorder recorder, JudgmentReader reader) {}
+
+    private final VerifyStages verify;
+
     public TurnService(CaseStore store, CaseReader reader, CaseLock lock, JdbcClient jdbc, Knowledge knowledge,
                        IntakeStep intake, FactExtractStep facts, AnswerApplier answers, BaselineStep baseline,
                        OmissionWatchStep watch, JudgeService judges, QuestionService questions, AppClock clock,
                        CodeVersion code, FlowProperties props, TurnLogWriter turnLogs, ExecutorService exec,
-                       JsonMapper json, AnswerStages stages) {
+                       JsonMapper json, AnswerStages stages, VerifyStages verify) {
+        this.verify = verify;
         this.store = store;
         this.reader = reader;
         this.lock = lock;
@@ -393,8 +406,10 @@ public class TurnService {
                         throw llmFailed(ctx, a, r.error());
                     }
                 }
+                case A7 -> a7(ctx, st);
+                case A8 -> a8(ctx, st);
                 case END_GENERAL -> {
-                    return base(st, TurnResult.GENERAL, null, storedGeneral(ctx.caseId));
+                    return base(st, TurnResult.GENERAL, null, finalOr(ctx.caseId, () -> storedGeneral(ctx.caseId)));
                 }
                 case END_TRANSFERRED -> {
                     return base(st, TurnResult.TRANSFERRED, null, null);
@@ -403,7 +418,7 @@ public class TurnService {
                     return base(st, TurnResult.QUESTION, question(st.lastTurn().orElseThrow()), null);
                 }
                 case END_RESULT -> {
-                    return base(st, TurnResult.RESULT, null, storedResult(ctx.caseId));
+                    return base(st, TurnResult.RESULT, null, finalOr(ctx.caseId, () -> storedResult(ctx.caseId)));
                 }
             }
         }
@@ -580,12 +595,8 @@ public class TurnService {
     /** 예비 출구 단계를 쓴다(S8부터 끝내지 않고 A4·A5로 이어 감). */
     private void exit(Ctx ctx, CaseState st) {
         String caseId = ctx.caseId;
-        List<PreliminaryExit.Reason> external = new ArrayList<>(lawReasons(ctx, st));
-        List<String> flags = watchFlags(ctx);
-        boolean wf = !flags.isEmpty();
-        if (wf) {
-            external.add(new PreliminaryExit.Reason(PreliminaryExit.WATCH_FLAG, null, String.join("; ", flags)));
-        }
+        List<PreliminaryExit.Reason> external = externalReasons(ctx, st);
+        boolean wf = external.stream().anyMatch(x -> PreliminaryExit.WATCH_FLAG.equals(x.code()));
         CaseJudge.Judgment j = judges.judge(st, external);
         // 질문 상한으로 멈췄으면 남은 후보(그 밖이면 비어 있음): 검토자가 묻지 않은 사실을 알게
         List<String> unasked = questions.next(st, facts.cloudItFlows(caseId), lawReasons(ctx, st)).openKeys();
@@ -598,6 +609,16 @@ public class TurnService {
         int seq = lock.write(caseId, st.inputMark(), "A3", NextAction.A3_EXIT_NAME, null,
                 () -> store.addStep(NewStep.code(caseId, "A3", NextAction.A3_EXIT_NAME, in, r, at, null, code.value())));
         ctx.steps.add(seq);
+    }
+
+    /** 출구에 넣는 바깥 사유: 적용 법령(OUTSIDE_KB_LAW) + 누락 감시 표시(WATCH_FLAG). 예비 출구와 A7·A8이 같은 것을 쓴다. */
+    List<PreliminaryExit.Reason> externalReasons(Ctx ctx, CaseState st) {
+        List<PreliminaryExit.Reason> external = new ArrayList<>(lawReasons(ctx, st));
+        List<String> flags = watchFlags(ctx);
+        if (!flags.isEmpty()) {
+            external.add(new PreliminaryExit.Reason(PreliminaryExit.WATCH_FLAG, null, String.join("; ", flags)));
+        }
+        return external;
     }
 
     /** 누락 감시 표시 글(이번 요청에서 돌렸으면 그 결과, 아니면 마지막 감시 단계 출력). 비면 표시 없음. */
@@ -857,6 +878,262 @@ public class TurnService {
                 qt.choices()), null, null, null);
     }
 
+    // ───────── A7 검증·출구 · A8 판정 기록 (S9) ─────────
+
+    boolean isGeneral(CaseState st) {
+        return IntakeJudge.GENERAL.equals(st.caseRow().intakeType());
+    }
+
+    /** 마지막 A5 답(구체: A5 단계 출력, 일반: G2 고르기 + 답 문장). */
+    Answer storedAnswer(String caseId, boolean general) {
+        if (general) {
+            TurnResult.Result g = storedGeneral(caseId);
+            return g == null ? null : g.answer();
+        }
+        JsonNode o = lastOutput(caseId, SpecificAnswerStep.STEP, SpecificAnswerStep.NAME);
+        return o == null ? null : json.treeToValue(o, Answer.class);
+    }
+
+    /** 같은 이름의 마지막 OK 단계 번호. */
+    Integer lastSeq(String caseId, String step, String name) {
+        return jdbc.sql("""
+                SELECT MAX(seq) FROM steps WHERE case_id=? AND step=? AND name=? AND status IN ('OK','RETRY_OK')""")
+                .params(caseId, step, name).query(Integer.class).optional().orElse(null);
+    }
+
+    static Set<String> ledgerRows(CaseState st) {
+        Set<String> out = new LinkedHashSet<>();
+        st.currentFacts().forEach(f -> out.addAll(f.ledgerRows()));
+        return out;
+    }
+
+    /** A7 인용 검증의 기준 재료(구체: 이번 꾸러미 키·A4 기록 해시·A3 후보 행, 일반: 고른 조 + 붙인 원문 단위). */
+    CitationVerifier.Basis citationBasis(Ctx ctx, CaseState st, Answer a, Opening op) {
+        String ledger = st.caseRow().ledgerVersion();
+        java.time.LocalDate date = java.time.LocalDate.parse(a.openDate());
+        if (Answer.GENERAL.equals(a.kind())) {
+            Set<String> allowed = new LinkedHashSet<>();
+            a.picks().forEach(p -> allowed.add(p.key()));
+            a.sources().forEach(x -> allowed.add(x.key()));
+            return new CitationVerifier.Basis(allowed, CitationVerifier.sources(a), null, Set.of(), ledger, date, true);
+        }
+        Map<String, String> recorded = new LinkedHashMap<>();
+        JsonNode a4 = lastOutput(ctx.caseId, "A4", NextAction.A4_NAME);
+        if (a4 != null && a4.has("sources")) {
+            a4.get("sources").properties().forEach(e -> recorded.put(e.getKey(), e.getValue().asString()));
+        }
+        return new CitationVerifier.Basis(op.opened().keys(), CitationVerifier.sources(a), recorded, ledgerRows(st),
+                ledger, date, true);
+    }
+
+    /** 쟁점("흐름|쟁점") → 넘긴 꾸러미 원문 키. */
+    static Map<String, List<String>> packageKeys(Opening op) {
+        Map<String, List<String>> out = new LinkedHashMap<>();
+        if (op != null) {
+            for (PackageOpener.OpenedIssue oi : op.opened().issues()) {
+                out.put(oi.flow() + "|" + oi.issueName(), oi.keys());
+            }
+        }
+        return out;
+    }
+
+    /** A7 판정 재료(같은 사실·판이면 같은 결과: A7과 A8이 따로 불려도 같다). */
+    record Verdict(CaseJudge.Judgment judgment, Answer answer, CitationVerifier.Report report,
+                   ExitAssembler.FinalExit exit, List<String> unasked, Opening opening) {}
+
+    Verdict verdict(Ctx ctx, CaseState st) {
+        KnowledgeSnapshot k = knowledge.snapshot();
+        boolean general = isGeneral(st);
+        Answer a = storedAnswer(ctx.caseId, general);
+        if (a == null) {
+            throw new IllegalStateException("A7: A5 답 없음 " + ctx.caseId);
+        }
+        ExitAssembler ea = new ExitAssembler(new ExitPolicy(k.ruleSet().exitPolicy()));
+        CitationVerifier cv = new CitationVerifier(k);
+        if (general) {
+            CitationVerifier.Report rep = cv.verify(citationBasis(ctx, st, a, null), CitationVerifier.issues(a));
+            return new Verdict(null, a, rep, ea.general(a, rep), List.of(), null);
+        }
+        Opening op = ctx.opening != null ? ctx.opening : opening(st);
+        CitationVerifier.Report rep = cv.verify(citationBasis(ctx, st, a, op), CitationVerifier.issues(a));
+        List<PreliminaryExit.Reason> external = externalReasons(ctx, st);
+        CaseJudge.Judgment j = judges.judge(st, external);
+        List<String> unasked = questions.next(st, facts.cloudItFlows(ctx.caseId), lawReasons(ctx, st)).openKeys();
+        return new Verdict(j, a, rep, ea.specific(j, a, rep), unasked, op);
+    }
+
+    /** A7(코드): 인용 검증 → 최종 출구 → 이관이면 검토 요청 묶음. 단계 output에 출구·검증·묶음(요지 전). */
+    private void a7(Ctx ctx, CaseState st) {
+        Verdict v = verdict(ctx, st);
+        Map<String, Object> bundle = v.exit().transfer() ? bundle(st, v) : null;
+        Map<String, Object> in = new LinkedHashMap<>();
+        boolean general = isGeneral(st);
+        in.put("answer_from_step", general ? lastSeq(ctx.caseId, GeneralAnswerStep.STEP, GeneralAnswerStep.NAME_TEXT)
+                : lastSeq(ctx.caseId, SpecificAnswerStep.STEP, SpecificAnswerStep.NAME));
+        in.put("a4_from_step", general ? null : lastSeq(ctx.caseId, "A4", NextAction.A4_NAME));
+        in.put("open_date", v.answer().openDate());
+        putLaw(in, ctx);
+        in.put("rule", "사유가 하나라도 있으면 TRANSFER, 없으면 exit_policy[사안 등급](03 4.2 A7 4)");
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("exit", v.exit());
+        out.put("verify", v.report().summary());
+        out.put("cites", v.report().cites());
+        out.put("bundle", bundle);
+        LocalDateTime at = clock.nowUtc();
+        String caseId = ctx.caseId;
+        int seq = lock.write(caseId, st.inputMark(), "A7", NextAction.A7_NAME, null, () -> store.addStep(
+                NewStep.code(caseId, "A7", NextAction.A7_NAME, in, out, at, null, code.value())));
+        ctx.steps.add(seq);
+    }
+
+    Map<String, Object> bundle(CaseState st, Verdict v) {
+        return new ReviewBundleBuilder(knowledge.snapshot()).build(new ReviewBundleBuilder.Input(st, v.judgment() == null
+                ? new CaseJudge.Judgment(List.of(), null, new PreliminaryExit.Exit("TRANSFER", null, List.of()))
+                : v.judgment(), v.exit(), v.answer(), v.report(), packageKeys(v.opening()), v.unasked(), v.answer().openDate()));
+    }
+
+    /**
+     * A8: 이관이면 검토자 요지(A7_summary)를 먼저 쓰고(실패면 LLM_FAILED → API 3), 판정 테이블에 저장한 뒤 사안을 닫는다.
+     * 출구·묶음은 A7 단계 output을 그대로 쓰고(감사: A7이 정한 것), 판정 행의 슬롯·쟁점은 같은 사실로 다시 낸 판정에서.
+     */
+    private void a8(Ctx ctx, CaseState st) {
+        String caseId = ctx.caseId;
+        JsonNode o7 = lastOutput(caseId, "A7", NextAction.A7_NAME);
+        ExitAssembler.FinalExit ex = json.treeToValue(o7.get("exit"), ExitAssembler.FinalExit.class);
+        Map<String, Object> bundle = o7.hasNonNull("bundle") ? json.convertValue(o7.get("bundle"), LinkedHashMap.class) : null;
+        Integer summarySeq = null;
+        if (ex.transfer()) {
+            if (!st.doneSinceInput(ReviewSummaryStep.STEP, ReviewSummaryStep.NAME, null)) {
+                int a7Seq = lastSeq(caseId, "A7", NextAction.A7_NAME);
+                ReviewSummaryStep.Result r = llmStage(ctx, () -> verify.summary().run(st, summaryBundle(o7), a7Seq,
+                        ctx.deadline), ReviewSummaryStep.Result::callIds);
+                ctx.steps.addAll(r.steps());
+                if (r.failed()) {
+                    throw llmFailed(ctx, NextAction.A8, "A7_summary: " + r.error());
+                }
+            }
+            JsonNode so = lastOutput(caseId, ReviewSummaryStep.STEP, ReviewSummaryStep.NAME);
+            summarySeq = lastSeq(caseId, ReviewSummaryStep.STEP, ReviewSummaryStep.NAME);
+            bundle.put("summary", so == null ? List.of() : json.convertValue(so.get("summary"), List.class));
+        }
+        CaseState now = reader.load(caseId).orElseThrow(() -> new CaseNotFound(caseId));
+        Verdict v = verdict(ctx, now);
+        Map<String, Integer> from = new LinkedHashMap<>();
+        boolean general = isGeneral(now);
+        if (general) {
+            from.put("a5_general", lastSeq(caseId, GeneralAnswerStep.STEP, GeneralAnswerStep.NAME));
+            from.put("a5_text", lastSeq(caseId, GeneralAnswerStep.STEP, GeneralAnswerStep.NAME_TEXT));
+        } else {
+            from.put("a3_exit", lastSeq(caseId, "A3", NextAction.A3_EXIT_NAME));
+            from.put("a4", lastSeq(caseId, "A4", NextAction.A4_NAME));
+            from.put("a5", lastSeq(caseId, SpecificAnswerStep.STEP, SpecificAnswerStep.NAME));
+        }
+        from.put("a7", lastSeq(caseId, "A7", NextAction.A7_NAME));
+        if (summarySeq != null) {
+            from.put("a7_summary", summarySeq);
+        }
+        from.values().removeIf(java.util.Objects::isNull);
+        CaseJudge.Judgment j = v.judgment() != null ? v.judgment()
+                : new CaseJudge.Judgment(List.of(), null, new PreliminaryExit.Exit(ex.exitType(), null, List.of()));
+        java.time.LocalDate openDate = java.time.LocalDate.parse(v.answer().openDate());
+        JudgmentRecorder.Written w = verify.recorder().write(knowledge.snapshot(), new JudgmentRecorder.Input(now, j, ex,
+                v.answer(), v.report(), bundle, v.unasked(), openDate, from), clock.nowUtc());
+        ctx.steps.add(w.stepSeq());
+    }
+
+    /** 요지 단계에 넘길 묶음(A7 단계 output의 bundle, 사유는 레코드로). */
+    @SuppressWarnings("unchecked")
+    Map<String, Object> summaryBundle(JsonNode o7) {
+        Map<String, Object> b = json.convertValue(o7.get("bundle"), LinkedHashMap.class);
+        List<ExitAssembler.Reason> rs = new ArrayList<>();
+        for (JsonNode r : o7.get("exit").get("reasons")) {
+            rs.add(json.treeToValue(r, ExitAssembler.Reason.class));
+        }
+        b.put("exit_reasons", rs);
+        return b;
+    }
+
+    /** 판정이 있으면 판정 테이블에서 지은 최종 결과, 없으면 예비 결과(옛 사안·A8 전). */
+    TurnResult.Result finalOr(String caseId, java.util.function.Supplier<TurnResult.Result> fallback) {
+        return verify.reader().latest(caseId).map(s -> finalResult(caseId, s)).orElseGet(fallback);
+    }
+
+    /** 최종 결과(S9): 판정 행(출구·등급·확정·슬롯·쟁점) + flags(구조 사유·흐름별 규칙·표시·unasked) + A8이 기댄 A5 답 + 묶음 요지. */
+    TurnResult.Result finalResult(String caseId, JudgmentReader.Stored s) {
+        JsonNode flags = s.flags();
+        List<TurnResult.Reason> reasons = new ArrayList<>();
+        if (flags != null && flags.has("reasons")) {
+            for (JsonNode r : flags.get("reasons")) {
+                reasons.add(new TurnResult.Reason(r.path("code").asString(), r.hasNonNull("flow") ? r.get("flow").asInt() : null,
+                        r.path("detail").asString(null)));
+            }
+        }
+        Map<Integer, JsonNode> flowFlags = new LinkedHashMap<>();
+        if (flags != null && flags.has("flows")) {
+            flags.get("flows").forEach(f -> flowFlags.put(f.get("flow").asInt(), f));
+        }
+        List<TurnResult.FlowResult> flows = new ArrayList<>();
+        for (Map.Entry<Integer, JsonNode> e : flowFlags.entrySet()) {
+            int n = e.getKey();
+            JsonNode ff = e.getValue();
+            Map<String, TurnResult.Slot> slots = new LinkedHashMap<>();
+            for (JudgmentReader.SlotRow r : s.slots()) {
+                if (r.flow() == n) {
+                    slots.put(r.slot(), new TurnResult.Slot(r.status(), r.values(), r.basisFacts(), r.unknownFacts(),
+                            strings(ff.path("open").path(r.slot())), strings(ff.path("slot_flags").path(r.slot()))));
+                }
+            }
+            List<TurnResult.Issue> issues = new ArrayList<>();
+            for (JudgmentReader.IssueRow i : s.issues()) {
+                if (i.flow() != n) {
+                    continue;
+                }
+                List<String> opens = new ArrayList<>();
+                ff.path("sub_packages").forEach(sp -> {
+                    if (i.issue().equals(sp.path("issue").asString())) {
+                        opens.add(sp.path("package_id").asString());
+                    }
+                });
+                issues.add(new TurnResult.Issue(i.issue(), i.packageId(), i.grade(), i.ruleIds(), i.conditions(),
+                        i.interp(), opens));
+            }
+            flows.add(new TurnResult.FlowResult(n, ff.path("grade").asString(null), slots, issues,
+                    strings(ff.path("fired_rules"))));
+        }
+        Answer a = null;
+        Map<String, Integer> from = s.fromSteps();
+        if (from.containsKey("a5")) {
+            a = stepOutput(caseId, from.get("a5"), Answer.class);
+        } else if (from.containsKey("a5_general")) {
+            a = stepOutput(caseId, from.get("a5_general"), Answer.class);
+            if (a != null && from.containsKey("a5_text")) {
+                JsonNode t = stepOutput(caseId, from.get("a5_text"), JsonNode.class);
+                if (t != null && t.hasNonNull("answer")) {
+                    GeneralAnswerStep.GeneralText g = json.treeToValue(t, GeneralAnswerStep.GeneralText.class);
+                    a = a.withText(g.answer(), g.cites());
+                }
+            }
+        }
+        List<String> summary = s.bundle() == null ? null : strings(s.bundle().path("summary"));
+        boolean watch = flags != null && flags.path("omission_watch").asBoolean(false);
+        return new TurnResult.Result(false, s.caseGrade(), s.exitType(), List.copyOf(reasons), watch, List.copyOf(flows),
+                flags == null ? List.of() : strings(flags.path("unasked")), a, s.judgmentId(), s.conclusive(), summary,
+                flags == null ? null : flags.get("verify"));
+    }
+
+    <T> T stepOutput(String caseId, int seq, Class<T> type) {
+        return jdbc.sql("SELECT output_json FROM steps WHERE case_id=? AND seq=?").params(caseId, seq).query(String.class)
+                .optional().map(t -> json.readValue(t, type)).orElse(null);
+    }
+
+    static List<String> strings(JsonNode n) {
+        List<String> out = new ArrayList<>();
+        if (n != null && n.isArray()) {
+            n.forEach(x -> out.add(x.asString()));
+        }
+        return out;
+    }
+
     // ───────── 응답 짓기 ─────────
 
     static TurnResult base(CaseState st, String outcome, TurnResult.Question q, TurnResult.Result r) {
@@ -881,8 +1158,10 @@ public class TurnService {
         NextAction a = NextAction.decide(st, baseline);
         return switch (a) {
             case END_QUESTION -> new Peek(TurnResult.QUESTION, null, question(st.lastTurn().orElseThrow()), null);
-            case END_RESULT -> new Peek(TurnResult.RESULT, null, null, storedResult(st.caseRow().caseId()));
-            case END_GENERAL -> new Peek(TurnResult.GENERAL, null, null, storedGeneral(st.caseRow().caseId()));
+            case END_RESULT -> new Peek(TurnResult.RESULT, null, null,
+                    finalOr(st.caseRow().caseId(), () -> storedResult(st.caseRow().caseId())));
+            case END_GENERAL -> new Peek(TurnResult.GENERAL, null, null,
+                    finalOr(st.caseRow().caseId(), () -> storedGeneral(st.caseRow().caseId())));
             case END_TRANSFERRED -> new Peek(TurnResult.TRANSFERRED, null, null, null);
             default -> new Peek("PENDING", a.name(), null, null);
         };
