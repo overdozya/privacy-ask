@@ -4,21 +4,40 @@
   "properties": {
     "flags": {
       "type": "array",
-      "maxItems": 10,
       "items": {
         "type": "object",
         "properties": {
-          "kind": { "type": "string", "enum": ["MISSED", "OUTSIDE"] },
-          "issue": { "type": "string", "minLength": 1, "maxLength": 60 },
-          "flow": { "type": "integer", "minimum": 1, "maximum": 20 },
-          "quote": { "type": "string", "minLength": 1, "maxLength": 300 },
-          "reason": { "type": "string", "minLength": 1, "maxLength": 300 }
+          "kind": {
+            "type": "string",
+            "enum": [
+              "MISSED",
+              "OUTSIDE"
+            ]
+          },
+          "issue": {
+            "type": "string"
+          },
+          "flow": {
+            "type": "integer"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
         },
-        "required": ["kind", "quote", "reason"],
+        "required": [
+          "kind",
+          "quote",
+          "reason"
+        ],
         "additionalProperties": false
       }
     }
   },
-  "required": ["flags"],
+  "required": [
+    "flags"
+  ],
   "additionalProperties": false
 }

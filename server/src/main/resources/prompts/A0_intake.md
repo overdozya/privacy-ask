@@ -1,4 +1,4 @@
-<!-- version: 2; max_output_tokens: 4096; thinking: default -->
+<!-- version: 3; max_output_tokens: 4096; thinking: default -->
 이 단계는 입구(A0)다. 현업 담당자가 쓴 문의 글 `text`를 읽고, 아래 다섯 가지 신호가 글에 있는지 표시한다. 일반 문의인지 구체 사안인지, 범위 밖인지는 코드가 신호를 보고 정한다. 너는 신호와 근거 문구만 낸다.
 
 신호(`kind`):
