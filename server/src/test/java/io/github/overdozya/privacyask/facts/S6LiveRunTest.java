@@ -81,10 +81,17 @@ class S6LiveRunTest {
         PromptCatalog alt = PromptCatalog.load("file:" + variantDir(low) , json);
         CaseStore store = new CaseStore(jdbc, new TransactionTemplate(tm), knowledge, json,
                 (id, v) -> def.has(id, v) || alt.has(id, v));
-        List<Variant> variants = List.of(variant("default", def, store), variant(low, alt, store));
+        // S6_SINGLE=1: 지금 프롬프트 파일 그대로 한 가지만(후속 확인용). S6_ONLY=Q1,Q2: 그 문의만
+        boolean single = "1".equals(System.getenv("S6_SINGLE"));
+        List<Variant> variants = single ? List.of(variant("files", def, store))
+                : List.of(variant("default", def, store), variant(low, alt, store));
+        List<String> only = System.getenv("S6_ONLY") == null ? List.of() : List.of(System.getenv("S6_ONLY").split(","));
 
         List<Map<String, Object>> results = new ArrayList<>();
         for (JsonNode q : spec.get("inquiries")) {
+            if (!only.isEmpty() && !only.contains(q.get("id").asString())) {
+                continue;
+            }
             for (Variant v : variants) {
                 results.add(runOne(v, store, q));
             }
@@ -92,7 +99,7 @@ class S6LiveRunTest {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("model", props.model());
         out.put("temperature", props.temperature());
-        out.put("prompt_versions", Map.of("default", versions(def), low, versions(alt)));
+        out.put("prompt_versions", single ? Map.of("files", versions(def)) : Map.of("default", versions(def), low, versions(alt)));
         out.put("runs", results);
         Path dst = Path.of(System.getenv().getOrDefault("S6_OUT", "build/s6_live.json"));
         Files.createDirectories(dst.toAbsolutePath().getParent());
@@ -160,7 +167,8 @@ class S6LiveRunTest {
         wall.put("A1", ms(t0));
         CaseState st = reader.load(id).orElseThrow();
         r.put("A1", a1.failed() ? Map.of("status", "LLM_FAILED", "error", a1.error())
-                : Map.of("status", a1.status().name(), "flows", st.flows(), "facts", factsView(st)));
+                : Map.of("status", a1.status().name(), "flows", st.flows(), "facts", factsView(st),
+                "counterparty_cloud_it", v.facts().counterpartyCloudIt(id), "cloud_it_flows", v.facts().cloudItFlows(id)));
         if (a1.failed()) {
             return r;
         }
