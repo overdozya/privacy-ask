@@ -21,14 +21,20 @@ public class QuestionService {
     private final JudgeService judges;
     private final Knowledge knowledge;
     private final QuestionSelector.Order order;
+    private final QuestionSelector.Priority priority;
+    private final int maxPerCase;
     private volatile QuestionSelector selector;
     private volatile CaseJudge builtFrom;
 
     public QuestionService(JudgeService judges, Knowledge knowledge,
-                           @Value("${app.question.order:CATALOG}") QuestionSelector.Order order) {
+                           @Value("${app.question.order:CATALOG}") QuestionSelector.Order order,
+                           @Value("${app.question.priority:ORDER}") QuestionSelector.Priority priority,
+                           @Value("${app.question.max-per-case:0}") int maxPerCase) {
         this.judges = judges;
         this.knowledge = knowledge;
         this.order = order;
+        this.priority = priority;
+        this.maxPerCase = maxPerCase;
     }
 
     public QuestionSelector selector() {
@@ -37,7 +43,7 @@ public class QuestionService {
         if (s == null || builtFrom != j) {
             synchronized (this) {
                 if (selector == null || builtFrom != j) {
-                    selector = new QuestionSelector(j, knowledge.snapshot().catalog(), order);
+                    selector = new QuestionSelector(j, knowledge.snapshot().catalog(), order, priority, maxPerCase);
                     builtFrom = j;
                 }
                 s = selector;

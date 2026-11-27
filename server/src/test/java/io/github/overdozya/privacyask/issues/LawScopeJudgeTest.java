@@ -26,4 +26,16 @@ class LawScopeJudgeTest {
         assertThat(J.judge(List.of("신용정보법 제32조", "의료법"))).extracting(PreliminaryExit.Reason::code)
                 .containsExactly(PreliminaryExit.OUTSIDE_KB_LAW, PreliminaryExit.OUTSIDE_KB_LAW);
     }
+
+    /** S7b: 법령 꼴이 아닌 영역 이름은 건너뛰고(사유 없음) skipped에 남는다. 법령 꼴인데 KB에 없으면 여전히 이관. */
+    @Test
+    void areaNamesSkipped() {
+        LawScopeJudge.Result r = J.check(List.of("위치정보", "의료", "신용정보", "의료법", "GDPR", "개인정보 보호법 제17조",
+                "전자금융거래법 시행령 제5조의2", "EU 일반 개인정보 보호 규정(GDPR)", "정보통신망법"));
+        assertThat(r.skipped()).containsExactly("위치정보", "의료", "신용정보");
+        assertThat(r.reasons()).extracting(PreliminaryExit.Reason::detail).containsExactly("의료법: KB에 없음",
+                "GDPR: KB에 없음", "전자금융거래법 시행령 제5조의2: KB에 없음", "EU 일반 개인정보 보호 규정(GDPR): KB에 없음",
+                "정보통신망법: KB에 없음");
+        assertThat(J.judge(List.of("위치정보"))).isEmpty();
+    }
 }

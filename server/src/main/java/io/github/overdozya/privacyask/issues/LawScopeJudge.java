@@ -12,9 +12,20 @@ import io.github.overdozya.privacyask.knowledge.Documents;
  * kb_documents.law_name에 맞춘다. 즉답 근거(use_policy ANSWER_BASIS)인 법령이 아니거나(REFERENCE·OUT) KB에 없으면
  * 이관 사유 OUTSIDE_KB_LAW. 이름은 공백을 빼고, 글 앞부분이 가장 길게 맞는 법령으로 본다('개인정보 보호법 시행령 제14조의2'
  * → 시행령). LLM을 부르지 않는다.
+ * 법령 꼴(…법·…법률·…령·…규칙·…고시·…지침·…규정·…조례·…훈령·…예규, 조문이 붙어도 됨, 또는 GDPR 같은 로마자 약칭)이 아닌 이름
+ * ('위치정보'·'의료' 같은 영역 이름)은 건너뛴다(S7b 메인 결정 2026-11-27: A0 (마)의 영역 이름이 법령 밖 이관을 만들던 오탐).
+ * 건너뛴 이름은 skipped로 돌려주어 부르는 쪽이 단계 기록에 남긴다.
  */
 public final class LawScopeJudge {
     private static final Pattern WS = Pattern.compile("\\s+", Pattern.UNICODE_CHARACTER_CLASS);
+    /** 끝의 조문 표시(제15조의2제1항제3호…)와 괄호 글. */
+    private static final Pattern ARTICLE = Pattern.compile("제\\d+조(의\\d+)?.*$");
+    private static final Pattern PAREN = Pattern.compile("[(（][^)）]*[)）]");
+    private static final Pattern LAW_SUFFIX = Pattern.compile(".*(법|법률|령|규칙|고시|지침|규정|조례|훈령|예규)$");
+    private static final Pattern ACRONYM = Pattern.compile(".*[A-Z]{3,}.*");
+
+    /** 이름 판정 한 번: reasons = OUTSIDE_KB_LAW 사유, skipped = 법령 꼴이 아니라 건너뛴 이름. */
+    public record Result(List<PreliminaryExit.Reason> reasons, List<String> skipped) {}
     public static final String ANSWER_BASIS = "ANSWER_BASIS";
 
     private final List<Documents.Doc> laws;
@@ -40,10 +51,32 @@ public final class LawScopeJudge {
         return best;
     }
 
+    /** 법령 꼴인가(KB 법령에 맞거나, 조문·괄호를 뗀 이름이 법령 꼬리로 끝나거나, 로마자 약칭이 있음). */
+    public boolean lawLike(String name) {
+        if (name == null || name.isBlank()) {
+            return false;
+        }
+        if (match(name) != null) {
+            return true;
+        }
+        String s = squash(PAREN.matcher(name).replaceAll(""));
+        String noArticle = ARTICLE.matcher(s).replaceAll("");
+        return LAW_SUFFIX.matcher(noArticle).matches() || ACRONYM.matcher(name).matches();
+    }
+
     public List<PreliminaryExit.Reason> judge(Collection<String> lawNames) {
+        return check(lawNames).reasons();
+    }
+
+    public Result check(Collection<String> lawNames) {
         List<PreliminaryExit.Reason> out = new ArrayList<>();
+        List<String> skipped = new ArrayList<>();
         for (String name : lawNames) {
             if (name == null || name.isBlank()) {
+                continue;
+            }
+            if (!lawLike(name)) {
+                skipped.add(name);
                 continue;
             }
             Documents.Doc d = match(name);
@@ -54,7 +87,7 @@ public final class LawScopeJudge {
                         name + ": " + d.lawName() + " " + d.usePolicy()));
             }
         }
-        return out;
+        return new Result(List.copyOf(out), List.copyOf(skipped));
     }
 
     private static String squash(String s) {

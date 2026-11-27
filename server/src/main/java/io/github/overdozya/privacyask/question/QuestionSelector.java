@@ -61,14 +61,32 @@ public final class QuestionSelector {
         }
     }
 
-    /** 고른 질문. why: 왜 물을 가치가 있나(단계 기록 output에 그대로). */
-    public record Ask(Integer flowNo, String factId, int askNo, String why) {}
+    /** 고른 질문. why: 왜 물을 가치가 있나(단계 기록 output에 그대로). impact: 보기에 따라 무엇이 바뀌나(S7b). */
+    public record Ask(Integer flowNo, String factId, int askNo, String why, Impact impact) {
+        public Ask(Integer flowNo, String factId, int askNo, String why) {
+            this(flowNo, factId, askNo, why, Impact.DETAIL);
+        }
+    }
+
+    /**
+     * 보기에 따라 바뀌는 것(S7b, 큰 것부터): EXIT = 사안 등급·출구, ISSUE = 그 흐름의 쟁점 이름, GRADE = 쟁점 등급,
+     * DETAIL = 쟁점 안의 조건·규칙·해석 쟁점·하위 꾸러미, 또는 함께 정하는 슬롯(06과 다르게 한 곳 1). 서비스명(F-S1)은 EXIT로 둔다.
+     */
+    public enum Impact { EXIT, ISSUE, GRADE, DETAIL }
+
+    /** 후보 순서(S7b): ORDER = 공통 → 흐름 → 사실 순서 그대로, IMPACT = Impact가 큰 것부터(같으면 ORDER 순). */
+    public enum Priority { ORDER, IMPACT }
 
     /**
      * 고른 결과와 계산 기록. worth: 물을 가치가 있는 후보 전부(순서대로, 첫째가 ask). considered: 본 후보 수,
      * evaluations: 흐름 판정 횟수(후보 × 보기 + 슬롯 가정), micros: 계산 시간(06 6.4 A2 계산 ms).
      */
-    public record Selection(Optional<Ask> ask, List<Ask> worth, int considered, int evaluations, long micros) {
+    public record Selection(Optional<Ask> ask, List<Ask> worth, int considered, int evaluations, long micros,
+                            boolean capped) {
+        public Selection(Optional<Ask> ask, List<Ask> worth, int considered, int evaluations, long micros) {
+            this(ask, worth, considered, evaluations, micros, false);
+        }
+
         public List<String> openKeys() {
             return worth.stream().map(a -> new Key(a.flowNo(), a.factId()) + (a.askNo() > 1 ? "(다시)" : "")).toList();
         }
@@ -80,6 +98,8 @@ public final class QuestionSelector {
     private final CaseJudge judge;
     private final Catalog catalog;
     private final Order order;
+    private final Priority priority;
+    private final int maxPerCase;
     private final Map<String, int[]> rulePos = new HashMap<>();   // 사실 → [슬롯 계산 순서, 규칙 ord, 원자 순서]
 
     public QuestionSelector(CaseJudge judge, Catalog catalog) {
@@ -87,9 +107,19 @@ public final class QuestionSelector {
     }
 
     public QuestionSelector(CaseJudge judge, Catalog catalog, Order order) {
+        this(judge, catalog, order, Priority.ORDER, 0);
+    }
+
+    /**
+     * maxPerCase: 사안당 질문(QUESTION 턴, 다시 묻기 포함) 상한, 0이면 없음(S7b). 다 쓰면 사안 등급·출구를 바꿀 수 있는 질문(Impact.EXIT)만
+     * 더 묻고, 그것도 없으면 멈춘다(Selection.capped, 남은 후보는 worth).
+     */
+    public QuestionSelector(CaseJudge judge, Catalog catalog, Order order, Priority priority, int maxPerCase) {
         this.judge = judge;
         this.catalog = catalog;
         this.order = order;
+        this.priority = priority;
+        this.maxPerCase = maxPerCase;
         List<String> slotOrder = judge.converter().order();
         for (int si = 0; si < slotOrder.size(); si++) {
             for (SlotRules.Rule r : judge.converter().slots().get(slotOrder.get(si)).rules()) {
@@ -109,6 +139,14 @@ public final class QuestionSelector {
         return order;
     }
 
+    public Priority priority() {
+        return priority;
+    }
+
+    public int maxPerCase() {
+        return maxPerCase;
+    }
+
     /** 흐름 안 사실 순서 열쇠(작을수록 먼저). */
     private java.util.Comparator<Catalog.Fact> factOrder() {
         java.util.Comparator<Catalog.Fact> byOrd = java.util.Comparator.comparingInt(Catalog.Fact::ord);
@@ -124,7 +162,19 @@ public final class QuestionSelector {
 
     /** 사안 상태에서: 물은 횟수는 QUESTION 턴으로 센다. cloudFlows: A1이 상대를 클라우드·IT 운영사로 낸 흐름. */
     public Selection select(CaseState state, Set<Integer> cloudFlows, Collection<PreliminaryExit.Reason> external) {
-        return select(judge.flows(state), askCounts(state), cloudFlows, external);
+        String svc = state.caseRow().serviceName();
+        Selection sel = select(judge.flows(state), askCounts(state), cloudFlows, external, svc != null && !svc.isBlank());
+        long asked = state.turns().stream().filter(CaseState.Turn::isQuestion).count();
+        return cap(sel, asked, maxPerCase);
+    }
+
+    /** 질문 상한(S7b): 넘어도 사안 등급·출구를 바꿀 수 있는 질문(EXIT)은 묻는다. 멈춰도 출구·등급은 다 물었을 때와 같다. */
+    static Selection cap(Selection sel, long asked, int maxPerCase) {
+        if (maxPerCase <= 0 || asked < maxPerCase || sel.ask().isEmpty()) {
+            return sel;
+        }
+        Optional<Ask> exit = sel.worth().stream().filter(a -> a.impact() == Impact.EXIT).findFirst();
+        return new Selection(exit, sel.worth(), sel.considered(), sel.evaluations(), sel.micros(), exit.isEmpty());
     }
 
     public static Map<Key, Integer> askCounts(CaseState state) {
@@ -139,6 +189,15 @@ public final class QuestionSelector {
 
     public Selection select(List<FlowFacts> flows, Map<Key, Integer> asks, Set<Integer> cloudFlows,
                             Collection<PreliminaryExit.Reason> external) {
+        return select(flows, asks, cloudFlows, external, false);
+    }
+
+    /**
+     * serviceKnown: 사안 서비스명(cases.service_name: API 1로 받았거나 F-S1에서 옮김)이 이미 있음 → F-S1(서비스명)을 묻지 않는다
+     * (원장 후보는 사안 서비스명으로 연다, S7b).
+     */
+    public Selection select(List<FlowFacts> flows, Map<Key, Integer> asks, Set<Integer> cloudFlows,
+                            Collection<PreliminaryExit.Reason> external, boolean serviceKnown) {
         long t0 = System.nanoTime();
         Run run = new Run(flows, asks, cloudFlows, external);
         List<Ask> worth = new ArrayList<>();
@@ -150,10 +209,10 @@ public final class QuestionSelector {
             Key k = new Key(null, f.factId());
             FactState cur = flows.isEmpty() ? FactState.ABSENT : flows.get(0).fact(f.factId());
             if (SERVICE_FACT.equals(f.factId())) {
-                if (eligible(cur, asks.getOrDefault(k, 0))) {
+                if (!serviceKnown && eligible(cur, asks.getOrDefault(k, 0))) {
                     run.considered++;
                     worth.add(new Ask(null, f.factId(), asks.getOrDefault(k, 0) + 1,
-                            "서비스명이 없어 원장 후보를 못 찾음(06 3.3 A3 기준선)"));
+                            "서비스명이 없어 원장 후보를 못 찾음(06 3.3 A3 기준선)", Impact.EXIT));
                 }
                 continue;
             }
@@ -163,7 +222,7 @@ public final class QuestionSelector {
             run.considered++;
             String why = run.worthCommon(f);
             if (why != null) {
-                worth.add(new Ask(null, f.factId(), asks.getOrDefault(k, 0) + 1, why));
+                worth.add(new Ask(null, f.factId(), asks.getOrDefault(k, 0) + 1, why, run.lastImpact));
             }
         }
         // 흐름 사실: 흐름 번호 → 사실 순서
@@ -182,9 +241,12 @@ public final class QuestionSelector {
                 run.considered++;
                 String why = run.worthFlow(i, f);
                 if (why != null) {
-                    worth.add(new Ask(flow.flowNo(), f.factId(), n + 1, why));
+                    worth.add(new Ask(flow.flowNo(), f.factId(), n + 1, why, run.lastImpact));
                 }
             }
+        }
+        if (priority == Priority.IMPACT) {
+            worth.sort(java.util.Comparator.comparingInt(a -> a.impact().ordinal()));   // 안정 정렬: 같은 등급은 ORDER 순
         }
         long micros = (System.nanoTime() - t0) / 1000;
         return new Selection(worth.stream().findFirst(), List.copyOf(worth), run.considered, run.evaluations, micros);
@@ -224,6 +286,7 @@ public final class QuestionSelector {
         final List<IssueDeriver.FlowIssues> base = new ArrayList<>();
         final Map<String, Boolean> slotMatters = new HashMap<>();
         int considered, evaluations;
+        Impact lastImpact = Impact.DETAIL;   // 바로 앞 worthFlow·worthCommon이 물을 가치를 찾았을 때 그 크기
 
         Run(List<FlowFacts> flows, Map<Key, Integer> asks, Set<Integer> cloud, Collection<PreliminaryExit.Reason> external) {
             this.flows = flows;
@@ -266,12 +329,19 @@ public final class QuestionSelector {
         String worthFlow(int i, Catalog.Fact f) {
             FlowFacts flow = flows.get(i);
             Map<String, String> byOption = new LinkedHashMap<>();
+            Set<String> exits = new LinkedHashSet<>(), names = new LinkedHashSet<>(), grades = new LinkedHashSet<>();
             for (Map.Entry<String, FactState> o : optionStates(f, true)) {
                 IssueDeriver.FlowIssues fi = judge.judgeFlow(flow.with(f.factId(), o.getValue()));
                 evaluations++;
-                byOption.put(o.getKey(), outcome(i, fi));
+                String out = outcome(i, fi);
+                byOption.put(o.getKey(), out);
+                String[] p = out.split(" \\| ");
+                exits.add(p[p.length - 2] + "|" + p[p.length - 1]);
+                names.add(namesSig(List.of(fi)));
+                grades.add(gradesSig(List.of(fi)));
             }
             if (new LinkedHashSet<>(byOption.values()).size() > 1) {
+                lastImpact = impact(exits, names, grades);
                 return "답에 따라 바뀜: " + summary(byOption);
             }
             // (나) 함께 정하는 슬롯: 이 사실이 열림에 남은 OPEN 슬롯
@@ -290,6 +360,7 @@ public final class QuestionSelector {
                     slotStates.add(r.status() + r.values() + r.openFacts());
                 }
                 if (slotStates.size() > 1) {
+                    lastImpact = Impact.DETAIL;
                     return "슬롯 " + e.getKey() + "이 열려 있고 그 값에 따라 결과가 바뀜, 이 답으로 좁혀짐";
                 }
             }
@@ -298,6 +369,7 @@ public final class QuestionSelector {
 
         String worthCommon(Catalog.Fact f) {
             Map<String, String> byOption = new LinkedHashMap<>();
+            Set<String> exits = new LinkedHashSet<>(), names = new LinkedHashSet<>(), grades = new LinkedHashSet<>();
             for (Map.Entry<String, FactState> o : optionStates(f, true)) {
                 List<IssueDeriver.FlowIssues> all = new ArrayList<>();
                 for (FlowFacts flow : flows) {
@@ -308,8 +380,15 @@ public final class QuestionSelector {
                 StringBuilder sb = new StringBuilder();
                 all.forEach(x -> sb.append(issuesSig(x)).append(" / "));
                 byOption.put(o.getKey(), sb + " | " + j.caseGrade() + " | " + j.exit().exitType());
+                exits.add(j.caseGrade() + "|" + j.exit().exitType());
+                names.add(namesSig(all));
+                grades.add(gradesSig(all));
             }
-            return new LinkedHashSet<>(byOption.values()).size() > 1 ? "답에 따라 바뀜: " + summary(byOption) : null;
+            if (new LinkedHashSet<>(byOption.values()).size() > 1) {
+                lastImpact = impact(exits, names, grades);
+                return "답에 따라 바뀜: " + summary(byOption);
+            }
+            return null;
         }
 
         /** 슬롯 값을 가정해(규칙이 낼 수 있는 값 하나씩 + SKIPPED) 결과가 OPEN일 때와 달라지나. */
@@ -337,6 +416,25 @@ public final class QuestionSelector {
                 return false;
             });
         }
+    }
+
+    static Impact impact(Set<String> exits, Set<String> names, Set<String> grades) {
+        return exits.size() > 1 ? Impact.EXIT : names.size() > 1 ? Impact.ISSUE : grades.size() > 1 ? Impact.GRADE
+                : Impact.DETAIL;
+    }
+
+    /** 흐름마다 쟁점 이름 집합. */
+    static String namesSig(List<IssueDeriver.FlowIssues> fs) {
+        StringBuilder sb = new StringBuilder();
+        fs.forEach(f -> sb.append(f.issues().stream().map(IssueDeriver.Issue::issueName).sorted().toList()).append('/'));
+        return sb.toString();
+    }
+
+    /** 흐름마다 (쟁점 이름, 등급). */
+    static String gradesSig(List<IssueDeriver.FlowIssues> fs) {
+        StringBuilder sb = new StringBuilder();
+        fs.forEach(f -> sb.append(f.issues().stream().map(i -> i.issueName() + ":" + i.grade()).sorted().toList()).append('/'));
+        return sb.toString();
     }
 
     /** 쟁점 집합의 비교 글: 이름·꾸러미·등급·규칙·조건·해석 쟁점(하위 꾸러미 포함). */

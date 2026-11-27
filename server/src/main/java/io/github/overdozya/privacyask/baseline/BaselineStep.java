@@ -107,7 +107,8 @@ public class BaselineStep {
             m.put("label", f.label());
             m.put("origin", f.origin());
             m.put("destination", f.destination());
-            m.put("service_name", LedgerCandidates.serviceFor(st, f).orElse(null));
+            m.put("service_name", c.groups().stream().filter(g -> g.flows().contains(n)).map(Group::service).findFirst()
+                    .orElse(LedgerCandidates.serviceFor(st, f).orElse(null)));
             flows.add(m);
         }
         in.put("flows", flows);

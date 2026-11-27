@@ -63,13 +63,28 @@ public final class LedgerCandidates {
                 .map(v -> v.detail()).filter(d -> d != null && !d.isBlank());
     }
 
+    /**
+     * 원장 후보를 열 서비스명(S7b 메인 결정 2026-11-27): 흐름 서비스명이 원장에 없으면(NONE) 사안 서비스명(API 1 또는 F-S1)으로
+     * 다시 찾는다. A1이 흐름 서비스명을 제품 종류('AI 스피커')로 내어 사안 서비스명('NUGU')이 묻히던 것을 막는다.
+     */
+    public static Optional<String> serviceFor(CaseState st, CaseState.Flow f, Ledger ledger) {
+        Optional<String> svc = serviceFor(st, f);
+        String caseSvc = st.caseRow().serviceName();
+        if (svc.isPresent() && caseSvc != null && !caseSvc.isBlank() && !caseSvc.strip().equals(svc.get().strip())
+                && ledger.forService(svc.get().strip()).kind() == Ledger.MatchKind.NONE
+                && ledger.forService(caseSvc.strip()).kind() != Ledger.MatchKind.NONE) {
+            return Optional.of(caseSvc.strip());
+        }
+        return svc;
+    }
+
     public static Candidates enumerate(CaseState st, List<Integer> flowNos, KnowledgeSnapshot k) {
         String version = ledgerVersion(st, k);
         List<Integer> noService = new ArrayList<>();
         Map<String, List<Integer>> byService = new LinkedHashMap<>();
         for (Integer n : flowNos) {
             CaseState.Flow f = st.flow(n).orElseThrow(() -> new IllegalArgumentException("없는 흐름 " + n));
-            Optional<String> svc = serviceFor(st, f);
+            Optional<String> svc = serviceFor(st, f, k.ledger());
             if (svc.isEmpty()) {
                 noService.add(n);
             } else {

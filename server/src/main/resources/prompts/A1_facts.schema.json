@@ -116,6 +116,15 @@
         ],
         "additionalProperties": false
       }
+    },
+    "unanswered": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10
+      }
     }
   },
   "required": [

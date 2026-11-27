@@ -42,6 +42,10 @@ app:
   # A2 질문 순서(메인 결정 2026-11-27): RULE = 슬롯 계산 순서 → 변환 규칙 ord(앞 규칙이 등급이 높은 값부터). CATALOG = fact_catalog.ord
   question:
     order: RULE
+    # 멈춤 규칙(S7b 메인 결정 2026-11-27): 후보를 바뀌는 것이 큰 순(사안 등급·출구 > 쟁점 이름 > 쟁점 등급 > 조건 등)으로 묻고,
+    # 사안당 질문 6개(다시 묻기 포함)를 넘으면 사안 등급·출구를 바꿀 수 있는 질문만 더 묻는다. 남은 후보는 결과 unasked에.
+    priority: IMPACT
+    max-per-case: 6
   llm:
     provider: ${LLM_PROVIDER:fake}
     model: ${LLM_MODEL:gemini-3.6-flash}

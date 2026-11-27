@@ -118,6 +118,7 @@ public class TurnService {
         final List<Integer> steps = new ArrayList<>();
         List<String> a0LawNames;      // 이번 요청에서 A0을 돌렸으면 그 (마) 이름
         OmissionWatchStep.Result watched;
+        List<String> lawNames = List.of(), lawSkipped = List.of();
 
         Ctx(TurnMeter meter, Instant deadline) {
             this.meter = meter;
@@ -478,15 +479,11 @@ public class TurnService {
         QuestionSelector.Selection sel = questions.next(st, cloud, external);
         ctx.meter.a2(sel.considered(), sel.evaluations(), sel.micros());
         Optional<QuestionSelector.Ask> ask = sel.ask();
-        // API 1의 service_name으로 서비스를 이미 알면 F-S1(서비스명)은 묻지 않는다(원장 후보는 사안 서비스명으로 연다)
-        if (ask.isPresent() && QuestionSelector.SERVICE_FACT.equals(ask.get().factId())
-                && st.caseRow().serviceName() != null) {
-            ask = sel.worth().stream().filter(x -> !QuestionSelector.SERVICE_FACT.equals(x.factId())).findFirst();
-        }
         Map<String, Object> in = new LinkedHashMap<>();
         in.put("order", questions.selector().order().name());
         in.put("cloud_flows", cloud);
         in.put("external", external.stream().map(TurnResult::reason).toList());
+        putLaw(in, ctx);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ask", ask.map(TurnService::askMap).orElse(null));
         out.put("why", ask.map(QuestionSelector.Ask::why).orElse("쟁점·등급·출구를 바꿀 남은 사실 없음"));
@@ -494,6 +491,10 @@ public class TurnService {
         out.put("considered", sel.considered());
         out.put("evaluations", sel.evaluations());
         out.put("micros", sel.micros());
+        out.put("impact", ask.map(a -> a.impact().name()).orElse(null));
+        if (sel.capped()) {
+            out.put("capped", "사안당 질문 상한 " + questions.selector().maxPerCase() + "에 닿아 그만 묻는다");
+        }
         LocalDateTime at = clock.nowUtc();
         CaseState.InputMark mark = st.inputMark();
         if (ask.isPresent()) {
@@ -544,9 +545,12 @@ public class TurnService {
             external.add(new PreliminaryExit.Reason(PreliminaryExit.WATCH_FLAG, null, String.join("; ", flags)));
         }
         CaseJudge.Judgment j = judges.judge(st, external);
-        TurnResult.Result r = TurnResult.result(j, wf);
+        // 질문 상한으로 멈췄으면 남은 후보(그 밖이면 비어 있음): 검토자가 묻지 않은 사실을 알게
+        List<String> unasked = questions.next(st, facts.cloudItFlows(caseId), lawReasons(ctx, st)).openKeys();
+        TurnResult.Result r = TurnResult.result(j, wf, unasked);
         Map<String, Object> in = new LinkedHashMap<>();
         in.put("external", external.stream().map(TurnResult::reason).toList());
+        putLaw(in, ctx);
         in.put("rule", "이관 사유가 있으면 TRANSFER, 없으면 exit_policy[사안 등급](06 3.3 예비 출구)");
         LocalDateTime at = clock.nowUtc();
         int seq = lock.write(caseId, st.inputMark(), "A3", NextAction.A3_EXIT_NAME, null,
@@ -580,7 +584,17 @@ public class TurnService {
      * 적용 법령(06 3.3, 메인 결정): A0 (마) 이름 + F-B2 '예(법령·조문)'의 자유 입력 글을 모아 LawScopeJudge로 → OUTSIDE_KB_LAW 사유.
      */
     List<PreliminaryExit.Reason> lawReasons(Ctx ctx, CaseState st) {
-        return judges.lawScope().judge(lawNames(ctx, st));
+        List<String> names = lawNames(ctx, st);
+        var r = judges.lawScope().check(names);
+        ctx.lawNames = names;
+        ctx.lawSkipped = r.skipped();
+        return r.reasons();
+    }
+
+    /** 단계 input에 남기는 법령 이름(모은 것·법령 꼴이 아니라 건너뛴 것, S7b). */
+    private static void putLaw(Map<String, Object> in, Ctx ctx) {
+        in.put("law_names", ctx.lawNames);
+        in.put("law_skipped", ctx.lawSkipped);
     }
 
     List<String> lawNames(Ctx ctx, CaseState st) {

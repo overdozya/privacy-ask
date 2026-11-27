@@ -232,7 +232,8 @@ class FlowApiTest {
         }
         System.out.println("S7 예시 사안 질문: " + asked);
         System.out.println("S7 예시 사안 턴 timing: " + timings);
-        assertThat(asked).containsExactly("1:F-T4#1", "1:F-C2#1", "1:F-C2#2", "2:F-B3#1", "2:F-C2#1");
+        // S7b 멈춤 규칙(IMPACT 순서, 상한 6): 같은 다섯 질문, 쟁점 이름을 바꾸는 F-C2가 조건만 바꾸는 F-T4보다 앞
+        assertThat(asked).containsExactly("1:F-C2#1", "1:F-C2#2", "2:F-B3#1", "2:F-C2#1", "1:F-T4#1");
         assertThat(r.body().get("outcome").asString()).isEqualTo("RESULT");
         JsonNode res = r.body().get("result");
         assertThat(res.get("preliminary").asBoolean()).isTrue();
@@ -275,6 +276,7 @@ class FlowApiTest {
         assertThat(res.get("exit_reasons").toString())
                 .isEqualTo("[{\"code\":\"REQUESTER_UNKNOWN\",\"flow\":1,\"detail\":\"cross_border: F-C2\"}]");
         assertThat(res.get("watch_flag").asBoolean()).isFalse();
+        assertThat(res.get("unasked")).isEmpty();
 
         // 사실: 재현표의 지금 사실(흐름·사실·상태·값)이 모두 같다. 원장 사실 L2~L4(지금 기준선이 흐름마다 넷을 적음)는 더 있음
         Map<String, String> want = new TreeMap<>();
@@ -372,7 +374,7 @@ class FlowApiTest {
         Res again = post("/api/cases/" + id + "/retry", null);
         assertThat(again.status()).as(String.valueOf(again.body())).isEqualTo(200);
         assertThat(again.body().get("outcome").asString()).isEqualTo("QUESTION");
-        assertThat(key(again.body().get("question"))).isEqualTo("1:F-T4");
+        assertThat(key(again.body().get("question"))).isEqualTo("1:F-C2");
         assertThat(jdbc.sql("SELECT status FROM steps WHERE case_id=? AND step='A1' AND actor='LLM' ORDER BY seq")
                 .param(id).query(String.class).list()).containsExactly("LLM_FAILED", "OK");
         assertThat(jdbc.sql("SELECT request_kind, result_code FROM turn_logs WHERE case_id=? ORDER BY turn_log_id")
@@ -494,7 +496,7 @@ class FlowApiTest {
         assertThat(v.body().get("facts").size()).isGreaterThan(20);
         assertThat(v.body().get("turns")).hasSize(1);
         assertThat(v.body().get("last").get("outcome").asString()).isEqualTo("QUESTION");
-        assertThat(v.body().get("last").get("question").get("fact_id").asString()).isEqualTo("F-T4");
+        assertThat(v.body().get("last").get("question").get("fact_id").asString()).isEqualTo("F-C2");
     }
 
     @Test
@@ -529,5 +531,70 @@ class FlowApiTest {
         List<String> ids = new ArrayList<>();
         k.body().get("prompts").forEach(p -> ids.add(p.get("prompt_id").asString()));
         assertThat(ids).contains("A0_intake", "A1_facts", "A3_ledger", "A3_watch");
+    }
+
+    // ───────── S7b 고침 ─────────
+
+    /** S7b 1: A0 (마)의 영역 이름('위치정보')은 법령 꼴이 아니라 건너뛰고(이관 사유 없음) A2 단계 input law_skipped에 남는다. */
+    @Test
+    void areaNameSkippedNotTransferReason() throws Exception {
+        routes.put("A0_intake", r -> FakeProvider.ok("""
+                {"signals":[{"kind":"OWN_CASE","quote":"T 멤버십 회원에게"},
+                            {"kind":"LAW_AREA","quote":"위치정보","name":"위치정보"}]}"""));
+        String id = create().body().get("case_id").asString();
+        JsonNode a2 = JSON.readTree(jdbc.sql("SELECT input_json FROM steps WHERE case_id=? AND step='A2' ORDER BY seq LIMIT 1")
+                .param(id).query(String.class).single());
+        assertThat(Condition.strings(a2.get("law_skipped"))).containsExactly("위치정보");
+        assertThat(a2.get("external")).isEmpty();
+    }
+
+    /** S7b 2: 흐름 서비스명이 원장에 없으면 사안 서비스명(API 1)으로 원장 후보를 연다. A1 입력에 case_service_name. */
+    @Test
+    void caseServiceNameUsedWhenFlowServiceNotInLedger() throws Exception {
+        String a1 = a1Json.replace("\"service_name\":\"T 멤버십\"", "\"service_name\":\"멤버십 문자 앱\"");
+        assertThat(a1).contains("멤버십 문자 앱");
+        routes.put("A1_facts", r -> FakeProvider.ok(a1));
+        Res r = post("/api/cases", Map.of("content", content, "service_name", "T 멤버십"));
+        assertThat(r.status()).as(String.valueOf(r.body())).isEqualTo(200);
+        String id = r.body().get("case_id").asString();
+        JsonNode cand = JSON.readTree(jdbc.sql("SELECT output_json FROM steps WHERE case_id=? AND name='원장 후보 행 열거'")
+                .param(id).query(String.class).single());
+        cand.get("groups").forEach(g -> assertThat(g.get("service").asString()).isEqualTo("T 멤버십"));
+        assertThat(fake.requests().stream().filter(x -> x.promptId().equals("A1_facts"))
+                .anyMatch(x -> x.user().contains("\"case_service_name\":\"T 멤버십\""))).isTrue();
+        // 흐름 1 L1은 명시 일치(첨부1-0040)로 정해진다
+        JsonNode v = get("/api/cases/" + id).body();
+        boolean l1 = false;
+        for (JsonNode f : v.get("facts")) {
+            l1 |= "L1".equals(f.get("fact_id").asString()) && f.get("flow").asInt() == 1 && "MATCHED".equals(f.get("status").asString());
+        }
+        assertThat(l1).isTrue();
+    }
+
+    /** S7b 4: 자유 답에 받은 질문의 사실이 없으면 업무 검사가 거절 → 다시 → 그 사실을 내면 같은 질문을 다시 묻지 않는다. */
+    @Test
+    void freeAnswerMustCoverAskedFact() throws Exception {
+        routes.put("A1_facts", r -> {
+            if (!r.user().contains("\"source\":\"ANSWER\"")) {
+                return FakeProvider.ok(a1Json);
+            }
+            return FakeProvider.ok(r.user().contains("[다시 요청]")
+                    ? "{\"flows\":[],\"facts\":[{\"fact\":\"F-C2\",\"flows\":[1],\"values\":[{\"label\":\"아니오\"}],"
+                    + "\"status\":\"INFERRED\",\"quote\":\"서버는 서울 리전에\"}],\"unanswered\":[]}"
+                    : "{\"flows\":[],\"facts\":[]}");
+        });
+        Res r = create();
+        String id = r.body().get("case_id").asString();
+        JsonNode q = r.body().get("question");
+        assertThat(key(q)).isEqualTo("1:F-C2");
+        Map<String, Object> a = new LinkedHashMap<>();
+        a.put("question_turn", q.get("turn_no").asInt());
+        a.put("choices", List.of());
+        a.put("text", "업체 말로는 서버는 서울 리전에 있다고 합니다.");
+        Res r2 = post("/api/cases/" + id + "/answers", a);
+        assertThat(r2.status()).as(String.valueOf(r2.body())).isEqualTo(200);
+        assertThat(key(r2.body().get("question"))).isNotEqualTo("1:F-C2");
+        assertThat(jdbc.sql("SELECT outcome FROM llm_call_logs WHERE case_id=? AND prompt_id='A1_facts' ORDER BY call_id")
+                .param(id).query(String.class).list()).containsExactly("OK", "CHECK_FAIL", "OK");
     }
 }

@@ -23,9 +23,12 @@ public record TurnResult(String caseId, String state, String outcome, Intake int
     /** turnNo = 이 질문 턴(답할 때 question_turn으로 보냄). flow가 null이면 공통 사실. */
     public record Question(int turnNo, Integer flow, String factId, int askNo, String text, List<String> choices) {}
 
-    /** 예비 결과(첫 묶음). preliminary는 늘 true: 뒤 묶음 A7이 인용 검증을 더해 대신한다(S9). */
+    /**
+     * 예비 결과(첫 묶음). preliminary는 늘 true: 뒤 묶음 A7이 인용 검증을 더해 대신한다(S9).
+     * unasked: 질문 상한으로 묻지 않은 후보("흐름:사실", S7b). 답에 따라 쟁점·조건은 바뀔 수 있으나 사안 등급·출구는 안 바뀐다.
+     */
     public record Result(boolean preliminary, String caseGrade, String exitType, List<Reason> exitReasons,
-                         boolean watchFlag, List<FlowResult> flows) {}
+                         boolean watchFlag, List<FlowResult> flows, List<String> unasked) {}
 
     public record Reason(String code, Integer flow, String detail) {}
 
@@ -40,6 +43,10 @@ public record TurnResult(String caseId, String state, String outcome, Intake int
     public record Timing(int turnMs, int llmCalls, int llmMs, int llmDepth, int dbStatements) {}
 
     static Result result(CaseJudge.Judgment j, boolean watchFlag) {
+        return result(j, watchFlag, List.of());
+    }
+
+    static Result result(CaseJudge.Judgment j, boolean watchFlag, List<String> unasked) {
         List<Reason> reasons = j.exit().reasons().stream().map(TurnResult::reason).toList();
         List<FlowResult> flows = new ArrayList<>();
         for (IssueDeriver.FlowIssues f : j.flows()) {
@@ -54,7 +61,7 @@ public record TurnResult(String caseId, String state, String outcome, Intake int
                     i.opens().stream().map(IssueDeriver.SubPackage::packageId).toList())).toList();
             flows.add(new FlowResult(f.flowNo(), f.grade(), slots, issues, f.firedRules()));
         }
-        return new Result(true, j.caseGrade(), j.exit().exitType(), reasons, watchFlag, flows);
+        return new Result(true, j.caseGrade(), j.exit().exitType(), reasons, watchFlag, flows, List.copyOf(unasked));
     }
 
     static Reason reason(PreliminaryExit.Reason r) {

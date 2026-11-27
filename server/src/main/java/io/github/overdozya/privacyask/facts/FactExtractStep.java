@@ -110,6 +110,9 @@ public class FactExtractStep {
         Map<String, Object> in = new LinkedHashMap<>();
         in.put("source", src.name());
         in.put("today", clock.seoulToday().toString());
+        if (st.caseRow().serviceName() != null && !st.caseRow().serviceName().isBlank()) {
+            in.put("case_service_name", st.caseRow().serviceName());   // S7b: 현업이 알려 준 사안 서비스명
+        }
         if (src == Source.ANSWER) {
             CaseState.Turn ans = answerTurn(st, answerTurn);
             CaseState.Turn q = ans.replyTo() == null ? null : st.turn(ans.replyTo()).orElse(null);
@@ -157,10 +160,29 @@ public class FactExtractStep {
     /** 통과면 null, 거절이면 이유(최대 3개). */
     String check(CaseState st, Source src, Integer answerTurn, FactOutput out) {
         List<String> bad = shape(st, src, out);
+        if (src == Source.ANSWER) {
+            askedFactMissing(st, answerTurn, out).ifPresent(bad::add);
+        }
         if (bad.isEmpty()) {
             bad = dryRun(st, src, answerTurn, out);
         }
         return bad.isEmpty() ? null : String.join("; ", bad.subList(0, Math.min(3, bad.size())));
+    }
+
+    /** 자유 답: 받은 질문의 사실이 facts(그 흐름)나 unanswered 어디에도 없으면 거절 이유(S7b). */
+    static Optional<String> askedFactMissing(CaseState st, Integer answerTurn, FactOutput out) {
+        CaseState.Turn ans = answerTurn(st, answerTurn);
+        CaseState.Turn q = ans.replyTo() == null ? null : st.turn(ans.replyTo()).orElse(null);
+        if (q == null || q.factId() == null) {
+            return Optional.empty();
+        }
+        boolean given = out.facts().stream().anyMatch(f -> f.fact().equals(q.factId())
+                && (q.flowNo() == null ? f.flows().isEmpty() : f.flows().contains(q.flowNo())));
+        if (given || out.unanswered().contains(q.factId())) {
+            return Optional.empty();
+        }
+        return Optional.of("받은 질문의 사실 " + q.factId() + (q.flowNo() == null ? "" : "(흐름 " + q.flowNo() + ")")
+                + "를 facts에 내거나, 답이 말하지 않으면 unanswered에 넣는다");
     }
 
     /** ① 모양 검사(DB 없음). */

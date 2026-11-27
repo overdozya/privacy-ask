@@ -298,4 +298,56 @@ class QuestionSelectorTest {
             assertThat(us.get(us.size() / 2)).as("p50 < 300ms(06 6.1 LLM 없는 턴 예산 전체)").isLessThan(300_000);
         }
     }
+
+    // ───────── S7b 멈춤 규칙 ─────────
+
+    /** 상한 전에는 그대로, 상한에 닿으면 EXIT 후보만 묻고 없으면 멈춤(capped, 남은 후보는 worth). */
+    @Test
+    void capAllowsOnlyExitImpactBeyondLimit() {
+        QuestionSelector.Ask detail = new QuestionSelector.Ask(1, "F-T4", 1, "조건", QuestionSelector.Impact.DETAIL);
+        QuestionSelector.Ask exit = new QuestionSelector.Ask(1, "F-D3", 1, "등급", QuestionSelector.Impact.EXIT);
+        var both = new QuestionSelector.Selection(java.util.Optional.of(detail), List.of(detail, exit), 2, 9, 1);
+        assertThat(QuestionSelector.cap(both, 5, 6)).isSameAs(both);
+        assertThat(QuestionSelector.cap(both, 6, 0)).isSameAs(both);
+        var c = QuestionSelector.cap(both, 6, 6);
+        assertThat(c.ask()).contains(exit);
+        assertThat(c.capped()).isFalse();
+        var onlyDetail = new QuestionSelector.Selection(java.util.Optional.of(detail), List.of(detail), 1, 3, 1);
+        var stop = QuestionSelector.cap(onlyDetail, 7, 6);
+        assertThat(stop.ask()).isEmpty();
+        assertThat(stop.capped()).isTrue();
+        assertThat(stop.openKeys()).containsExactly("1:F-T4");
+    }
+
+    /** IMPACT 순서: 예시 사안 첫 차례에서 쟁점 이름을 바꾸는 F-C2(국외 이전)가 조건만 바꾸는 F-T4보다 앞. 질문은 같은 다섯. */
+    @Test
+    void impactPriorityExampleSameFive() {
+        assumeThat(ExampleCaseDb.available()).as("case.db·sqlite3 없음").isTrue();
+        QuestionSelector imp = new QuestionSelector(judge, snap.catalog(), QuestionSelector.Order.RULE,
+                QuestionSelector.Priority.IMPACT, 6);
+        List<FlowFacts> flows = exampleStart();
+        Map<Key, Integer> asks = new HashMap<>();
+        Map<String, FactState> answers = new LinkedHashMap<>();
+        answers.put("1:F-T4", FactState.confirmed("아니오"));
+        answers.put("1:F-C2", FactState.unknown("잘 모르겠음"));
+        answers.put("2:F-C2", FactState.confirmed("아니오"));
+        answers.put("2:F-B3", FactState.confirmed("앞으로 받을 예정"));
+        List<String> asked = new ArrayList<>();
+        for (int turn = 0; turn < 10; turn++) {
+            var s = imp.select(flows, asks, Set.of(), List.of());
+            var a = s.ask();
+            if (a.isEmpty()) {
+                break;
+            }
+            Key k = new Key(a.get().flowNo(), a.get().factId());
+            asked.add(k + "#" + a.get().askNo() + " " + a.get().impact());
+            int idx = a.get().flowNo() - 1;
+            flows.set(idx, answer(flows.get(idx), k.factId(), answers.get(k.toString())));
+            asks.merge(k, 1, Integer::sum);
+        }
+        System.out.println("A2 IMPACT 예시 사안 질문: " + asked);
+        assertThat(asked).extracting(x -> x.split(" ")[0])
+                .containsExactly("1:F-C2#1", "1:F-C2#2", "2:F-B3#1", "2:F-C2#1", "1:F-T4#1");
+        assertThat(asked.get(4)).endsWith("DETAIL");
+    }
 }
