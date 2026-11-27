@@ -21,6 +21,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import io.github.overdozya.privacyask.answer.Answer;
+import io.github.overdozya.privacyask.answer.GeneralAnswerStep;
+import io.github.overdozya.privacyask.answer.SpecificAnswerStep;
 import io.github.overdozya.privacyask.baseline.BaselineStep;
 import io.github.overdozya.privacyask.common.AppClock;
 import io.github.overdozya.privacyask.common.CodeVersion;
@@ -38,6 +41,8 @@ import io.github.overdozya.privacyask.knowledge.Catalog;
 import io.github.overdozya.privacyask.knowledge.Knowledge;
 import io.github.overdozya.privacyask.knowledge.KnowledgeSnapshot;
 import io.github.overdozya.privacyask.llm.LlmResult;
+import io.github.overdozya.privacyask.packages.PackageOpener;
+import io.github.overdozya.privacyask.packages.PackageService;
 import io.github.overdozya.privacyask.question.QuestionSelector;
 import io.github.overdozya.privacyask.question.QuestionService;
 import io.github.overdozya.privacyask.question.QuestionText;
@@ -83,12 +88,21 @@ public class TurnService {
     private final TurnLogWriter turnLogs;
     private final ExecutorService exec;
     private final JsonMapper json;
+    private final AnswerStages stages;
+
+    /** S8: A4 꾸러미 열기·A5 답변(구체·일반). gapQuestions = 사안당 A5 사실 부족 gap으로 더 묻는 질문 수 상한. */
+    public record AnswerStages(PackageService packages, SpecificAnswerStep specific, GeneralAnswerStep general,
+                               int gapQuestions) {
+        public AnswerStages(PackageService packages, SpecificAnswerStep specific, GeneralAnswerStep general) {
+            this(packages, specific, general, 1);
+        }
+    }
 
     public TurnService(CaseStore store, CaseReader reader, CaseLock lock, JdbcClient jdbc, Knowledge knowledge,
                        IntakeStep intake, FactExtractStep facts, AnswerApplier answers, BaselineStep baseline,
                        OmissionWatchStep watch, JudgeService judges, QuestionService questions, AppClock clock,
                        CodeVersion code, FlowProperties props, TurnLogWriter turnLogs, ExecutorService exec,
-                       JsonMapper json) {
+                       JsonMapper json, AnswerStages stages) {
         this.store = store;
         this.reader = reader;
         this.lock = lock;
@@ -107,6 +121,7 @@ public class TurnService {
         this.turnLogs = turnLogs;
         this.exec = exec;
         this.json = json;
+        this.stages = stages;
     }
 
     /** 요청 하나의 문맥. */
@@ -119,6 +134,7 @@ public class TurnService {
         List<String> a0LawNames;      // 이번 요청에서 A0을 돌렸으면 그 (마) 이름
         OmissionWatchStep.Result watched;
         List<String> lawNames = List.of(), lawSkipped = List.of();
+        Opening opening;               // 이번 요청에서 A4를 돌렸으면 그 결과(A5가 그대로 씀)
 
         Ctx(TurnMeter meter, Instant deadline) {
             this.meter = meter;
@@ -352,12 +368,27 @@ public class TurnService {
                     }
                     ctx.watched = r;
                 }
-                case A3_EXIT -> {
-                    return exit(ctx, st);
+                case A3_EXIT -> exit(ctx, st);
+                case A4 -> a4(ctx, st);
+                case A5_SPECIFIC -> {
+                    TurnResult q = a5(ctx, st, a);
+                    if (q != null) {
+                        return q;
+                    }
                 }
-                case END_GENERAL, END_TRANSFERRED -> {
-                    return base(st, a == NextAction.END_GENERAL ? TurnResult.GENERAL : TurnResult.TRANSFERRED,
-                            null, null);
+                case A5_GENERAL -> {
+                    GeneralAnswerStep.Result r = llmStage(ctx, () -> stages.general().run(st,
+                            stages.packages().articleList(clock.seoulToday()), ctx.deadline), GeneralAnswerStep.Result::callIds);
+                    ctx.steps.addAll(r.steps());
+                    if (r.failed()) {
+                        throw llmFailed(ctx, a, r.error());
+                    }
+                }
+                case END_GENERAL -> {
+                    return base(st, TurnResult.GENERAL, null, storedGeneral(ctx.caseId));
+                }
+                case END_TRANSFERRED -> {
+                    return base(st, TurnResult.TRANSFERRED, null, null);
                 }
                 case END_QUESTION -> {
                     return base(st, TurnResult.QUESTION, question(st.lastTurn().orElseThrow()), null);
@@ -537,7 +568,8 @@ public class TurnService {
         return m;
     }
 
-    private TurnResult exit(Ctx ctx, CaseState st) {
+    /** 예비 출구 단계를 쓴다(S8부터 끝내지 않고 A4·A5로 이어 감). */
+    private void exit(Ctx ctx, CaseState st) {
         String caseId = ctx.caseId;
         List<PreliminaryExit.Reason> external = new ArrayList<>(lawReasons(ctx, st));
         List<String> flags = watchFlags(ctx);
@@ -557,7 +589,6 @@ public class TurnService {
         int seq = lock.write(caseId, st.inputMark(), "A3", NextAction.A3_EXIT_NAME, null,
                 () -> store.addStep(NewStep.code(caseId, "A3", NextAction.A3_EXIT_NAME, in, r, at, null, code.value())));
         ctx.steps.add(seq);
-        return base(st, TurnResult.RESULT, null, r);
     }
 
     /** 누락 감시 표시 글(이번 요청에서 돌렸으면 그 결과, 아니면 마지막 감시 단계 출력). 비면 표시 없음. */
@@ -627,9 +658,175 @@ public class TurnService {
                 .map(json::readTree).orElse(null);
     }
 
+    /** 마지막 예비 출구 결과 + 그 뒤 A5 답(있으면, S8). 답이 더한 이관 사유는 출구에도 들어간다. */
     TurnResult.Result storedResult(String caseId) {
         JsonNode o = lastOutput(caseId, "A3", NextAction.A3_EXIT_NAME);
-        return o == null ? null : json.treeToValue(o, TurnResult.Result.class);
+        if (o == null) {
+            return null;
+        }
+        TurnResult.Result r = json.treeToValue(o, TurnResult.Result.class);
+        Answer a = answerAfter(caseId, "A3", NextAction.A3_EXIT_NAME, SpecificAnswerStep.STEP, SpecificAnswerStep.NAME);
+        return r.withAnswer(a);
+    }
+
+    /** 일반 문의 답(마지막 A5 일반 단계). */
+    TurnResult.Result storedGeneral(String caseId) {
+        JsonNode o = lastOutput(caseId, GeneralAnswerStep.STEP, GeneralAnswerStep.NAME);
+        return o == null ? null : TurnResult.general(json.treeToValue(o, Answer.class));
+    }
+
+    /** (afterStep, afterName)의 마지막 OK 단계 뒤에 쓴 (step, name) 마지막 OK 단계 출력 → 답. 1문장. */
+    Answer answerAfter(String caseId, String afterStep, String afterName, String step, String name) {
+        return jdbc.sql("""
+                SELECT s.output_json FROM steps s WHERE s.case_id=? AND s.step=? AND s.name=? AND s.status IN ('OK','RETRY_OK')
+                  AND s.seq > (SELECT MAX(p.seq) FROM steps p WHERE p.case_id=? AND p.step=? AND p.name=?
+                               AND p.status IN ('OK','RETRY_OK'))
+                ORDER BY s.seq DESC LIMIT 1""").params(caseId, step, name, caseId, afterStep, afterName)
+                .query(String.class).optional().map(t -> json.readValue(t, Answer.class)).orElse(null);
+    }
+
+    // ───────── A4 꾸러미 · A5 답변 (S8) ─────────
+
+    /** A4 결과(같은 요청이면 A5가 그대로 쓰고, 재시도면 스냅샷에서 다시 연다: 같은 사실·판이면 같은 결과). */
+    record Opening(CaseJudge.Judgment judgment, PackageOpener.RefDate ref, PackageOpener.Opened opened) {}
+
+    Opening opening(CaseState st) {
+        CaseJudge.Judgment j = judges.judge(st, List.of());
+        CaseState.CaseRow c = st.caseRow();
+        PackageOpener.RefDate ref = PackageOpener.referenceDate(c.referenceDate(), c.referenceDateBasis(),
+                clock.seoulToday());
+        PackageOpener.Opened o = stages.packages().open(c.packageVersion(), issueRefs(j), ref.openDate());
+        return new Opening(j, ref, o);
+    }
+
+    static List<PackageOpener.IssueRef> issueRefs(CaseJudge.Judgment j) {
+        List<PackageOpener.IssueRef> out = new ArrayList<>();
+        for (IssueDeriver.FlowIssues f : j.flows()) {
+            for (IssueDeriver.Issue i : f.issues()) {
+                out.add(new PackageOpener.IssueRef(f.flowNo(), i.issueName(), i.packageId(), i.conditionIds(),
+                        i.interpOn(), i.opens().stream().map(x -> new PackageOpener.SubRef(x.packageId(),
+                        x.conditionIds(), x.interpOn())).toList()));
+            }
+        }
+        return out;
+    }
+
+    static List<SpecificAnswerStep.FlowIn> flowsIn(CaseJudge.Judgment j) {
+        List<SpecificAnswerStep.FlowIn> out = new ArrayList<>();
+        for (IssueDeriver.FlowIssues f : j.flows()) {
+            Map<String, SpecificAnswerStep.SlotIn> slots = new LinkedHashMap<>();
+            f.slots().forEach((k, v) -> slots.put(k, new SpecificAnswerStep.SlotIn(v.status(), v.values())));
+            List<SpecificAnswerStep.IssueIn> issues = f.issues().stream().map(i -> new SpecificAnswerStep.IssueIn(
+                    f.flowNo(), i.issueName(), i.packageId(), i.grade(), i.ruleIds(), i.conditionIds(),
+                    i.allInterpOn())).toList();
+            out.add(new SpecificAnswerStep.FlowIn(f.flowNo(), slots, issues));
+        }
+        return out;
+    }
+
+    /** A4 꾸러미 열기 단계(코드). output에는 키·해시·연결·시행 예정·크기·열기 µs(원문은 넣지 않음: 스냅샷에서 같은 키로 다시 나온다). */
+    private void a4(Ctx ctx, CaseState st) {
+        Opening op = opening(st);
+        ctx.opening = op;
+        PackageOpener.RefDate ref = op.ref();
+        PackageOpener.Opened o = op.opened();
+        Map<String, Object> in = new LinkedHashMap<>();
+        in.put("reference_date", ref.caseDate() == null ? null : String.valueOf(ref.caseDate()));
+        in.put("reference_date_basis", ref.basis());
+        in.put("open_date", String.valueOf(ref.openDate()));
+        in.put("past", ref.past());
+        in.put("from_today", ref.fromToday());
+        in.put("package_version", o.packageVersion());
+        in.put("issues", issueRefs(op.judgment()));
+        Map<String, Object> out = new LinkedHashMap<>();
+        List<Map<String, Object>> issues = new ArrayList<>();
+        for (PackageOpener.OpenedIssue oi : o.issues()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("flow", oi.flow());
+            m.put("issue", oi.issueName());
+            m.put("package_id", oi.packageId());
+            m.put("conditions", oi.conditionIds());
+            m.put("items", oi.items().stream().map(PackageOpener.OpenedItem::itemId).toList());
+            m.put("keys", oi.keys());
+            m.put("linked", oi.linked());
+            m.put("missing", oi.missing());
+            issues.add(m);
+        }
+        out.put("issues", issues);
+        Map<String, String> hashes = new LinkedHashMap<>();
+        List<Map<String, Object>> upcoming = new ArrayList<>();
+        for (PackageOpener.Source s : o.sources().values()) {
+            hashes.put(s.key(), s.textHash());
+            if (s.hasUpcoming()) {
+                upcoming.add(Map.of("key", s.key(),
+                        "from", s.upcoming().stream().map(u -> String.valueOf(u.effectiveFrom())).toList()));
+            }
+        }
+        out.put("sources", hashes);
+        out.put("pending_amendment", upcoming);
+        out.put("units", o.sources().size());
+        out.put("chars", o.chars());
+        out.put("micros", o.micros());
+        LocalDateTime at = clock.nowUtc();
+        String caseId = ctx.caseId;
+        int seq = lock.write(caseId, st.inputMark(), "A4", NextAction.A4_NAME, null, () -> store.addStep(
+                NewStep.code(caseId, "A4", NextAction.A4_NAME, in, out, at, null, code.value())));
+        ctx.steps.add(seq);
+    }
+
+    static int gapQuestionsAsked(CaseState st) {
+        return (int) st.steps().stream().filter(s -> "A2".equals(s.step()) && NextAction.A2_GAP_NAME.equals(s.name())
+                && s.ok()).count();
+    }
+
+    /**
+     * A5 구체 답변. 사실 부족 gap이 A2가 지금 물을 수 있는 후보(상한으로 멈춘 것 포함)의 사실을 말하면, 사안당 gapQuestions번까지 그 질문을
+     * 낸다(QUESTION 턴, 단계 이름 A2_GAP_NAME). 없으면 그대로 결과로 간다.
+     */
+    private TurnResult a5(Ctx ctx, CaseState st, NextAction a) {
+        Opening op = ctx.opening != null ? ctx.opening : opening(st);
+        List<SpecificAnswerStep.FlowIn> flows = flowsIn(op.judgment());
+        QuestionSelector.Selection sel = null;
+        List<SpecificAnswerStep.Askable> askable = List.of();
+        List<PreliminaryExit.Reason> external = lawReasons(ctx, st);
+        if (gapQuestionsAsked(st) < stages.gapQuestions()) {
+            sel = questions.next(st, facts.cloudItFlows(ctx.caseId), external);
+            askable = sel.worth().stream().map(x -> new SpecificAnswerStep.Askable(x.flowNo(), x.factId())).toList();
+        }
+        final List<SpecificAnswerStep.Askable> ask0 = askable;
+        SpecificAnswerStep.Result r = llmStage(ctx, () -> stages.specific().run(st, flows, op.opened(), op.ref(), ask0,
+                ctx.deadline), SpecificAnswerStep.Result::callIds);
+        ctx.steps.addAll(r.steps());
+        if (r.failed()) {
+            throw llmFailed(ctx, a, r.error());
+        }
+        if (r.asked() == null || sel == null) {
+            return null;
+        }
+        SpecificAnswerStep.Askable want = r.asked();
+        QuestionSelector.Ask ask = sel.worth().stream()
+                .filter(x -> java.util.Objects.equals(x.flowNo(), want.flow()) && x.factId().equals(want.fact()))
+                .findFirst().orElseThrow();
+        QuestionText.Text qt = questions.text(st, ask);
+        String caseId = ctx.caseId;
+        Map<String, Object> in = new LinkedHashMap<>();
+        in.put("from_step", r.steps().get(0));
+        in.put("candidates", sel.openKeys());
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ask", askMap(ask));
+        out.put("why", "A5 사실 부족 gap이 이 사실을 말함(사안당 " + stages.gapQuestions() + "번까지): " + ask.why());
+        LocalDateTime at = clock.nowUtc();
+        int[] w = lock.write(caseId, st.inputMark(), "A2", NextAction.A2_GAP_NAME, null, () -> {
+            int seq = store.addStep(NewStep.code(caseId, "A2", NextAction.A2_GAP_NAME, in, out, at, null, code.value()));
+            int turn = store.addTurn(NewTurn.question(caseId, seq, ask.flowNo(), ask.factId(), ask.askNo(), qt.text(),
+                    qt.choices(), at));
+            return new int[] {seq, turn};
+        });
+        ctx.steps.add(w[0]);
+        CaseState.CaseRow c = st.caseRow();
+        return new TurnResult(caseId, c.state(), TurnResult.QUESTION, new TurnResult.Intake(c.intakeType(),
+                c.outOfScopeKind()), new TurnResult.Question(w[1], ask.flowNo(), ask.factId(), ask.askNo(), qt.text(),
+                qt.choices()), null, null, null);
     }
 
     // ───────── 응답 짓기 ─────────
@@ -657,7 +854,7 @@ public class TurnService {
         return switch (a) {
             case END_QUESTION -> new Peek(TurnResult.QUESTION, null, question(st.lastTurn().orElseThrow()), null);
             case END_RESULT -> new Peek(TurnResult.RESULT, null, null, storedResult(st.caseRow().caseId()));
-            case END_GENERAL -> new Peek(TurnResult.GENERAL, null, null, null);
+            case END_GENERAL -> new Peek(TurnResult.GENERAL, null, null, storedGeneral(st.caseRow().caseId()));
             case END_TRANSFERRED -> new Peek(TurnResult.TRANSFERRED, null, null, null);
             default -> new Peek("PENDING", a.name(), null, null);
         };

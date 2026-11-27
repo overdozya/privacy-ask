@@ -3,6 +3,8 @@ package io.github.overdozya.privacyask.flow;
 import java.util.List;
 import java.util.Optional;
 
+import io.github.overdozya.privacyask.answer.GeneralAnswerStep;
+import io.github.overdozya.privacyask.answer.SpecificAnswerStep;
 import io.github.overdozya.privacyask.baseline.BaselineStep;
 import io.github.overdozya.privacyask.baseline.LedgerCandidates;
 import io.github.overdozya.privacyask.facts.AnswerApplier;
@@ -32,13 +34,22 @@ public enum NextAction {
     A2,
     /** 누락 감시(LLM). */
     A3_WATCH,
-    /** 예비 출구. */
+    /** 예비 출구(쓰고 이어 감, S8). */
     A3_EXIT,
+    /** 꾸러미 열기(코드, S8): 쟁점 → 꾸러미 원문, 기준일 판, 연결 한 단계. */
+    A4,
+    /** 구체 답변(LLM, S8). 사실 부족 gap이면 A2 후보가 있을 때 질문으로 돌아간다. */
+    A5_SPECIFIC,
+    /** 일반 질의 답변 G2(LLM, S8). */
+    A5_GENERAL,
     END_GENERAL, END_TRANSFERRED, END_QUESTION, END_RESULT;
 
     public static final String A2_NAME = "다음 질문 고르기";
     public static final String A3_JUDGE_NAME = "슬롯 변환·쟁점 도출";
     public static final String A3_EXIT_NAME = "예비 출구";
+    public static final String A4_NAME = "꾸러미 열기";
+    /** A5 사실 부족 gap을 A2 후보로 다시 묻는 질문 단계(A2_NAME과 다른 이름: 같은 입력 안에서 늦은 저장 검사가 겹치지 않게). */
+    public static final String A2_GAP_NAME = "답변 뒤 질문";
 
     public boolean ends() {
         return name().startsWith("END_");
@@ -56,6 +67,9 @@ public enum NextAction {
             return CLOSE_OUT_OF_SCOPE;
         }
         if (IntakeJudge.GENERAL.equals(c.intakeType())) {
+            if (!st.doneSinceInput(GeneralAnswerStep.STEP, GeneralAnswerStep.NAME, null)) {
+                return A5_GENERAL;
+            }
             return END_GENERAL;
         }
         Optional<CaseState.Turn> user = st.lastUserTurn();
@@ -90,6 +104,12 @@ public enum NextAction {
         }
         if (!st.doneSinceInput("A3", A3_EXIT_NAME, null)) {
             return A3_EXIT;
+        }
+        if (!st.doneSinceInput("A4", A4_NAME, null)) {
+            return A4;
+        }
+        if (!st.doneSinceInput(SpecificAnswerStep.STEP, SpecificAnswerStep.NAME, null)) {
+            return A5_SPECIFIC;
         }
         return END_RESULT;
     }

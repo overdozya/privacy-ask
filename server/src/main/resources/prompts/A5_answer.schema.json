@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "issues": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "properties": {
+          "flow": { "type": "integer", "minimum": 1, "maximum": 20 },
+          "issue": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "opinion": { "type": "string", "minLength": 1, "maxLength": 1200 },
+          "actions": { "type": "array", "maxItems": 5, "items": { "type": "string", "minLength": 1, "maxLength": 300 } },
+          "cites": { "type": "array", "minItems": 1, "maxItems": 15, "items": { "type": "string", "minLength": 1, "maxLength": 100 } },
+          "ledger_rows": { "type": "array", "maxItems": 10, "items": { "type": "string", "minLength": 1, "maxLength": 40 } },
+          "conclusive": { "type": "boolean" }
+        },
+        "required": ["flow", "issue", "opinion", "actions", "cites", "ledger_rows", "conclusive"],
+        "additionalProperties": false
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string", "enum": ["FACT_MISSING", "INTERPRETATION", "OUTSIDE_PACKAGE"] },
+          "flow": { "type": ["integer", "null"], "minimum": 1, "maximum": 20 },
+          "issue": { "type": ["string", "null"], "maxLength": 60 },
+          "facts": { "type": "array", "maxItems": 10, "items": { "type": "string", "minLength": 1, "maxLength": 10 } },
+          "note": { "type": "string", "minLength": 1, "maxLength": 300 }
+        },
+        "required": ["kind", "flow", "issue", "facts", "note"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["issues", "gaps"],
+  "additionalProperties": false
+}

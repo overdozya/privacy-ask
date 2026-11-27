@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "picks": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "why": { "type": "string", "minLength": 1, "maxLength": 300 }
+        },
+        "required": ["key", "why"],
+        "additionalProperties": false
+      }
+    },
+    "no_basis": { "type": "boolean" },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 600 }
+  },
+  "required": ["picks", "no_basis", "reason"],
+  "additionalProperties": false
+}

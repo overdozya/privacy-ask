@@ -101,6 +101,40 @@ class FlowApiTest {
         routes.put("A1_facts", r -> FakeProvider.ok(a1Json));
         routes.put("A3_ledger", FlowApiTest::ledgerCites);
         routes.put("A3_watch", r -> FakeProvider.ok("{\"flags\":[]}"));
+        routes.put("A5_answer", r -> FakeProvider.ok(answerFromInput(r, false)));
+        routes.put("A5_general", r -> FakeProvider.ok(
+                "{\"picks\":[{\"key\":\"개인정보보호법|26|\",\"why\":\"위탁 문서 기재 사항\"}],\"no_basis\":false,"
+                        + "\"reason\":\"위탁 계약서에 무엇을 적는지 묻는 일반 질문\"}"));
+    }
+
+    /** S8 A5 손 출력: 넘긴 흐름·쟁점마다 첫 원문 키를 인용하고, 그 흐름 원장 대조의 첫 행을 단다(conclusive는 인자). 받은 입력대로 짓는다. */
+    static String answerFromInput(ProviderRequest r, boolean conclusive) {
+        JsonNode in = JSON.readTree(r.user().split("\n\n\\[다시 요청]")[0]);
+        ObjectNode out = JSON.createObjectNode();
+        ArrayNode issues = out.putArray("issues");
+        for (JsonNode f : in.get("flows")) {
+            String row = null;
+            for (JsonNode l : f.get("ledger")) {
+                if (row == null && l.get("rows").size() > 0) {
+                    row = l.get("rows").get(0).asString();
+                }
+            }
+            for (JsonNode i : f.get("issues")) {
+                ObjectNode o = issues.addObject();
+                o.put("flow", f.get("flow").asInt());
+                o.put("issue", i.get("issue").asString());
+                o.put("opinion", "손으로 쓴 의견");
+                o.putArray("actions").add("손으로 쓴 조치");
+                o.putArray("cites").add(i.get("keys").get(0).get("key").asString());
+                ArrayNode rows = o.putArray("ledger_rows");
+                if (row != null) {
+                    rows.add(row);
+                }
+                o.put("conclusive", conclusive);
+            }
+        }
+        out.putArray("gaps");
+        return out.toString();
     }
 
     /** 예시 A1 출력(옛 꼴: values [[라벨, 내용]], flow 숫자·목록, NOT_FOUND 포함)을 지금 A1_facts 스키마로. 모르는 사실은 내지 않는다. */
@@ -277,6 +311,20 @@ class FlowApiTest {
                 .isEqualTo("[{\"code\":\"REQUESTER_UNKNOWN\",\"flow\":1,\"detail\":\"cross_border: F-C2\"}]");
         assertThat(res.get("watch_flag").asBoolean()).isFalse();
         assertThat(res.get("unasked")).isEmpty();
+        // S8 ⑤: 답(A5)이 붙음. 쟁점 5개마다 의견·인용(꾸러미 원문 키), 원문 요약은 코드가 붙임. 기준일 = 예시 F-S3 2026-12-01
+        JsonNode ans = res.get("answer");
+        System.out.println("S8 예시 사안 답: " + ans);
+        assertThat(ans.get("kind").asString()).isEqualTo("SPECIFIC");
+        assertThat(ans.get("reference_date").asString()).isEqualTo("2026-12-01");
+        assertThat(ans.get("open_date").asString()).isEqualTo("2026-12-01");
+        assertThat(ans.get("issues")).hasSize(5);
+        assertThat(ans.get("issues")).allSatisfy(i -> assertThat(i.get("cites").size()).isPositive());
+        assertThat(ans.get("sources").size()).isPositive();
+        assertThat(ans.get("sources")).allSatisfy(x -> assertThat(x.get("text_hash").asString()).isNotBlank());
+        assertThat(ans.get("ledger_rows").get(0).get("row_id").asString()).isEqualTo("첨부1-0040");
+        assertThat(ans.get("conclusive").asBoolean()).isFalse();
+        assertThat(jdbc.sql("SELECT COUNT(*) FROM steps WHERE case_id=? AND step='A4' AND name='꾸러미 열기'").param(id)
+                .query(Long.class).single()).isEqualTo(1L);
 
         // 사실: 재현표의 지금 사실(흐름·사실·상태·값)이 모두 같다. 원장 사실 L2~L4(지금 기준선이 흐름마다 넷을 적음)는 더 있음
         Map<String, String> want = new TreeMap<>();
@@ -313,7 +361,8 @@ class FlowApiTest {
             assertThat(logs.get(i)).containsEntry("request_kind", "ANSWER").containsEntry("llm_calls", 0)
                     .containsEntry("llm_depth", 0);
         }
-        assertThat(logs.get(5)).containsEntry("llm_calls", 1).containsEntry("llm_depth", 1)
+        // S8: 마지막 답 = 감시 1 + A5 답변 1(직렬)
+        assertThat(logs.get(5)).containsEntry("llm_calls", 2).containsEntry("llm_depth", 2)
                 .containsEntry("result_code", "OK_RESULT");
         assertThat(logs).allSatisfy(l -> assertThat(((Number) l.get("db_statements")).intValue()).isPositive());
         assertThat(jdbc.sql("SELECT COUNT(*) FROM llm_call_logs WHERE case_id=? AND (step_seq IS NULL OR discarded=1)")
@@ -467,7 +516,16 @@ class FlowApiTest {
         assertThat(discarded).isEqualTo(1L);
         assertThat(jdbc.sql("SELECT COUNT(*) FROM steps WHERE case_id=? AND step='A1'").param(id).query(Long.class)
                 .single()).isZero();
-        assertThat(r.body().get("timing").get("llm_depth").asInt()).isEqualTo(1);
+        // S8: A0 → A5 일반(G2) 직렬. 결과는 고른 조의 원문(코드가 붙임)
+        assertThat(r.body().get("timing").get("llm_depth").asInt()).isEqualTo(2);
+        JsonNode ans = r.body().get("result").get("answer");
+        assertThat(ans.get("kind").asString()).isEqualTo("GENERAL");
+        assertThat(ans.get("picks").get(0).get("key").asString()).isEqualTo("개인정보보호법|26|");
+        assertThat(ans.get("sources").size()).isPositive();
+        assertThat(ans.get("sources")).allSatisfy(x -> assertThat(x.get("key").asString()).startsWith("개인정보보호법|26|"));
+        assertThat(r.body().get("result").get("exit_type").asString()).isEqualTo("ANSWER");
+        assertThat(get("/api/cases/" + id).body().get("last").get("result").get("answer").get("kind").asString())
+                .isEqualTo("GENERAL");
     }
 
     @Test
@@ -596,5 +654,95 @@ class FlowApiTest {
         assertThat(key(r2.body().get("question"))).isNotEqualTo("1:F-C2");
         assertThat(jdbc.sql("SELECT outcome FROM llm_call_logs WHERE case_id=? AND prompt_id='A1_facts' ORDER BY call_id")
                 .param(id).query(String.class).list()).containsExactly("OK", "CHECK_FAIL", "OK");
+    }
+
+    // ───────── S8 A4·A5 ─────────
+
+    static final Map<String, String> EXAMPLE_ANSWERS = Map.of("1:F-T4", "아니오", "1:F-C2", "잘 모르겠음", "2:F-C2", "아니오",
+            "2:F-B3", "앞으로 받을 예정");
+
+    /** 예시 사안을 질문이 끝날 때까지(마지막 응답을 돌려줌, 503이면 거기서). */
+    static Res runExample() throws Exception {
+        Res r = create();
+        String id = r.body().get("case_id").asString();
+        for (int i = 0; i < 10 && r.status() == 200 && "QUESTION".equals(r.body().get("outcome").asString()); i++) {
+            JsonNode q = r.body().get("question");
+            r = post("/api/cases/" + id + "/answers", answer(q.get("turn_no").asInt(), EXAMPLE_ANSWERS.get(key(q))));
+        }
+        return r;
+    }
+
+    static List<String> outcomes(String id, String prompt) {
+        return jdbc.sql("SELECT outcome FROM llm_call_logs WHERE case_id=? AND prompt_id=? ORDER BY call_id")
+                .params(id, prompt).query(String.class).list();
+    }
+
+    /** ④ 꾸러미 밖 키 인용 → 업무 검사 거절 → 다시(거절 이유가 붙은 요청) → 맞으면 RETRY_OK. */
+    @Test
+    void answerOutsidePackageKeyRejectedThenRetryOk() throws Exception {
+        List<String> seen = new java.util.concurrent.CopyOnWriteArrayList<>();
+        routes.put("A5_answer", r -> {
+            seen.add(r.user());
+            if (!r.user().contains("[다시 요청]")) {
+                return FakeProvider.ok(answerFromInput(r, true).replaceFirst("\"cites\":\\[\"[^\"]+\"",
+                        "\"cites\":[\"개인정보보호법|71|1||\""));
+            }
+            return FakeProvider.ok(answerFromInput(r, true));
+        });
+        Res r = runExample();
+        assertThat(r.status()).as(String.valueOf(r.body())).isEqualTo(200);
+        assertThat(r.body().get("outcome").asString()).isEqualTo("RESULT");
+        String id = r.body().get("case_id").asString();
+        assertThat(outcomes(id, "A5_answer")).containsExactly("CHECK_FAIL", "OK");
+        assertThat(seen.get(1)).contains("넘긴 꾸러미 밖");
+        assertThat(jdbc.sql("SELECT status FROM steps WHERE case_id=? AND step='A5'").param(id).query(String.class).list())
+                .containsExactly("RETRY_OK");
+        // 모델이 모두 확정이라 해도 사안 출구는 예비 출구 그대로(고 등급 → TRANSFER), 쟁점은 확정
+        JsonNode ans = r.body().get("result").get("answer");
+        assertThat(ans.get("issues")).allSatisfy(i -> assertThat(i.get("conclusive").asBoolean()).isTrue());
+        assertThat(r.body().get("result").get("exit_type").asString()).isEqualTo("TRANSFER");
+    }
+
+    /** ④ 후보 밖 원장 행 두 번 → LLM_FAILED(503) → 고친 뒤 API 3으로 이어서 결과. 해석 필요 gap → 이관 사유. */
+    @Test
+    void answerOutsideRowTwiceLlmFailedThenRetry() throws Exception {
+        routes.put("A5_answer", r -> FakeProvider.ok(answerFromInput(r, false)
+                .replace("\"ledger_rows\":[]", "\"ledger_rows\":[\"첨부1-0039\"]")));
+        Res r = runExample();
+        assertThat(r.status()).isEqualTo(503);
+        assertThat(r.body().get("code").asString()).isEqualTo("LLM_FAILED");
+        assertThat(r.body().get("details").get("action").asString()).isEqualTo("A5_SPECIFIC");
+        String id = r.body().get("details").get("case_id").asString();
+        assertThat(outcomes(id, "A5_answer")).containsExactly("CHECK_FAIL", "CHECK_FAIL");
+        assertThat(get("/api/cases/" + id).body().get("last").get("next_action").asString()).isEqualTo("A5_SPECIFIC");
+
+        routes.put("A5_answer", x -> FakeProvider.ok(answerFromInput(x, false).replace("\"gaps\":[]",
+                "\"gaps\":[{\"kind\":\"INTERPRETATION\",\"flow\":2,\"issue\":\"목적 외 이용\",\"facts\":[],"
+                        + "\"note\":\"제휴 마케팅이 수집 목적과 합리적으로 관련되는지\"}]")));
+        Res again = post("/api/cases/" + id + "/retry", null);
+        assertThat(again.status()).as(String.valueOf(again.body())).isEqualTo(200);
+        JsonNode res = again.body().get("result");
+        assertThat(res.get("exit_reasons").toString()).contains("GAP_INTERPRETATION");
+        assertThat(res.get("answer").get("gaps").get(0).get("handled").asString()).isEqualTo("REASON");
+        // A4는 다시 열지 않음(한 입력에 한 번), A5 단계는 LLM_FAILED 뒤 OK
+        assertThat(jdbc.sql("SELECT CONCAT(step,' ',status) FROM steps WHERE case_id=? AND step IN ('A4','A5') ORDER BY seq")
+                .param(id).query(String.class).list()).containsExactly("A4 OK", "A5 LLM_FAILED", "A5 OK");
+    }
+
+    /** ④ 일반 G2: 목록 밖 키 두 번 → LLM_FAILED. 근거 없음 → 검토 안내(TRANSFER, NO_BASIS). */
+    @Test
+    void generalOutsideListRejectedAndNoBasis() throws Exception {
+        routes.put("A0_intake", r -> FakeProvider.ok("{\"signals\":[]}"));
+        routes.put("A5_general", r -> FakeProvider.ok(
+                "{\"picks\":[{\"key\":\"개인정보보호법|71|\",\"why\":\"벌칙\"}],\"no_basis\":false,\"reason\":\"r\"}"));
+        Res r = create();
+        assertThat(r.status()).isEqualTo(503);
+        String id = r.body().get("details").get("case_id").asString();
+        assertThat(outcomes(id, "A5_general")).containsExactly("CHECK_FAIL", "CHECK_FAIL");
+        routes.put("A5_general", x -> FakeProvider.ok("{\"picks\":[],\"no_basis\":true,\"reason\":\"벌칙은 목록 밖\"}"));
+        Res again = post("/api/cases/" + id + "/retry", null);
+        assertThat(again.body().get("outcome").asString()).isEqualTo("GENERAL");
+        assertThat(again.body().get("result").get("exit_type").asString()).isEqualTo("TRANSFER");
+        assertThat(again.body().get("result").get("exit_reasons").get(0).get("code").asString()).isEqualTo("NO_BASIS");
     }
 }
