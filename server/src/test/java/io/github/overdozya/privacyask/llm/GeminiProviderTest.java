@@ -75,7 +75,7 @@ class GeminiProviderTest {
         reply = """
                 {"candidates":[{"content":{"role":"model","parts":[{"text":"생각","thought":true},{"text":"{\\"a\\":"},{"text":"\\"b\\"}"}]},
                   "finishReason":"STOP"}],
-                 "usageMetadata":{"promptTokenCount":120,"candidatesTokenCount":7,"thoughtsTokenCount":300,"totalTokenCount":427},
+                 "usageMetadata":{"promptTokenCount":120,"candidatesTokenCount":7,"thoughtsTokenCount":300,"cachedContentTokenCount":96,"totalTokenCount":427},
                  "modelVersion":"gemini-test-001","responseId":"r1"}
                 """;
         ProviderResponse r = provider(true, true, KEY).generate(req(Duration.ofSeconds(5)));
@@ -84,6 +84,7 @@ class GeminiProviderTest {
         assertThat(r.promptTokens()).isEqualTo(120);
         assertThat(r.outputTokens()).isEqualTo(7);
         assertThat(r.thoughtTokens()).isEqualTo(300);
+        assertThat(r.cachedTokens()).as("S8b 캐시 토큰").isEqualTo(96);
         assertThat(r.modelVersion()).isEqualTo("gemini-test-001");
         assertThat(r.httpStatus()).isEqualTo(200);
 

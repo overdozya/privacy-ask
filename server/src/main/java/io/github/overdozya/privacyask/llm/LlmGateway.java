@@ -103,7 +103,7 @@ public class LlmGateway {
                 Outcome outcome = e.kind() == ProviderException.Kind.TIMEOUT ? Outcome.TIMEOUT : Outcome.HTTP_ERROR;
                 lastError = e.getMessage();
                 callIds.add(logs.write(entry(ctx, prompt, temperature, attempts, outcome, e.httpStatus(), null,
-                        e.latencyMs(), null, null, null, null, inputSha, e.body(), e.getMessage())));
+                        e.latencyMs(), null, null, null, null, null, inputSha, e.body(), e.getMessage())));
                 if (!e.retryable() || transportRetried || attempts >= MAX_ATTEMPTS) {
                     break;
                 }
@@ -146,7 +146,7 @@ public class LlmGateway {
             }
             callIds.add(logs.write(entry(ctx, prompt, temperature, attempts, outcome, res.httpStatus(),
                     res.finishReason(), res.latencyMs(), res.promptTokens(), res.outputTokens(), res.thoughtTokens(),
-                    res.modelVersion(), inputSha, res.text(), reason)));
+                    res.cachedTokens(), res.modelVersion(), inputSha, res.text(), reason)));
             if (outcome == Outcome.OK) {
                 LlmResult.Status st = attempts == 1 ? LlmResult.Status.OK : LlmResult.Status.RETRY_OK;
                 return new LlmResult<>(value, node, st, attempts, provider.name(), props.model(), temperature,
@@ -174,10 +174,10 @@ public class LlmGateway {
 
     private CallLogEntry entry(CallContext ctx, Prompt prompt, BigDecimal temperature, int attempt, Outcome outcome,
                                Integer httpStatus, String finish, long latency, Integer pt, Integer ot, Integer tt,
-                               String modelVersion, String inputSha, String responseText, String error) {
+                               Integer cached, String modelVersion, String inputSha, String responseText, String error) {
         return new CallLogEntry(ctx.caseId(), ctx.stepSeq(), prompt.id(), prompt.versionTag(), provider.name(),
                 props.model(), modelVersion, temperature, attempt, outcome, httpStatus, finish, latency, pt, ot, tt,
-                inputSha, responseText, error, ctx.discarded(), clock.nowUtc());
+                inputSha, responseText, error, ctx.discarded(), clock.nowUtc(), cached);
     }
 
     private static Duration jittered(Duration base) {

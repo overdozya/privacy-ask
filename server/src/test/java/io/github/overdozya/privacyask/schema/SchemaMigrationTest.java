@@ -50,7 +50,7 @@ class SchemaMigrationTest {
     void allSevenMigrationsAppliedAndTablesExist() {
         List<String> versions = jdbc.sql("SELECT version FROM flyway_schema_history WHERE success = 1 ORDER BY installed_rank")
                 .query(String.class).list();
-        assertThat(versions).containsExactly("1", "2", "3", "4", "5", "6", "7");
+        assertThat(versions).containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
         Set<String> tables = new TreeSet<>(jdbc.sql("""
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' AND table_name <> 'flyway_schema_history'

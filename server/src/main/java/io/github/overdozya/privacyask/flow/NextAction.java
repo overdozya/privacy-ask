@@ -42,6 +42,8 @@ public enum NextAction {
     A5_SPECIFIC,
     /** 일반 질의 답변 G2(LLM, S8). */
     A5_GENERAL,
+    /** 일반 질의 답 문장(LLM, S8b): 고른 조 원문만 보고 2~4문장. */
+    A5_GENERAL_TEXT,
     END_GENERAL, END_TRANSFERRED, END_QUESTION, END_RESULT;
 
     public static final String A2_NAME = "다음 질문 고르기";
@@ -69,6 +71,9 @@ public enum NextAction {
         if (IntakeJudge.GENERAL.equals(c.intakeType())) {
             if (!st.doneSinceInput(GeneralAnswerStep.STEP, GeneralAnswerStep.NAME, null)) {
                 return A5_GENERAL;
+            }
+            if (!st.doneSinceInput(GeneralAnswerStep.STEP, GeneralAnswerStep.NAME_TEXT, null)) {
+                return A5_GENERAL_TEXT;
             }
             return END_GENERAL;
         }

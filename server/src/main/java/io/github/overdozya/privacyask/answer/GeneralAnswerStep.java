@@ -38,6 +38,94 @@ import tools.jackson.databind.json.JsonMapper;
  */
 public class GeneralAnswerStep {
     public static final String STEP = "A5", PROMPT = "A5_general", NAME = "답변(일반 질의)";
+    /** 두 번째 호출(S8b): 고른 조 원문만 보고 2~4문장. 고른 조가 없으면 LLM 없이 코드 단계로 건너뜀을 남긴다. */
+    public static final String PROMPT_TEXT = "A5_general_answer", NAME_TEXT = "답변 문장(일반 질의)";
+
+    /** 답 문장 LLM 출력(prompts/A5_general_answer.schema.json). */
+    public record GeneralText(String answer, List<String> cites) {
+        public GeneralText {
+            cites = cites == null ? List.of() : List.copyOf(cites);
+        }
+    }
+
+    public record TextResult(LlmResult.Status status, GeneralText text, List<Integer> steps, List<Long> callIds,
+                             String error) {
+        public boolean failed() {
+            return status == LlmResult.Status.LLM_FAILED;
+        }
+    }
+
+    /** 고른 조 키 + 붙인 원문 단위 키. */
+    static java.util.Set<String> citable(Answer picked) {
+        java.util.Set<String> out = new LinkedHashSet<>();
+        picked.picks().forEach(p -> out.add(p.key()));
+        picked.sources().forEach(s -> out.add(s.key()));
+        return out;
+    }
+
+    static String checkText(Answer picked, GeneralText out) {
+        List<String> bad = new ArrayList<>();
+        if (out.answer() == null || out.answer().isBlank()) {
+            bad.add("답 문장 없음");
+        }
+        if (out.cites().isEmpty()) {
+            bad.add("인용 키 없음");
+        }
+        java.util.Set<String> ok = citable(picked);
+        out.cites().stream().filter(c -> !ok.contains(c)).forEach(c -> bad.add("키 '" + c + "'는 고른 조 밖"));
+        return bad.isEmpty() ? null : String.join("; ", bad.subList(0, Math.min(4, bad.size())));
+    }
+
+    /** 고른 조 원문(+ 안내서 절 제목)만 넘겨 답 문장을 쓴다. 고른 조가 없으면 코드 단계(건너뜀)만. */
+    public TextResult runText(CaseState st, Answer picked, Instant deadline) {
+        String caseId = st.caseRow().caseId();
+        LocalDateTime at = clock.nowUtc();
+        if (picked.picks() == null || picked.picks().isEmpty()) {
+            int seq = lock.write(caseId, st.inputMark(), STEP, NAME_TEXT, null, () -> store.addStep(NewStep.code(caseId,
+                    STEP, NAME_TEXT, Map.of("picks", 0), Map.of("skipped", "고른 조 없음(근거 없음 → 검토 안내)"), at,
+                    null, code.value())));
+            return new TextResult(LlmResult.Status.OK, null, List.of(seq), List.of(), null);
+        }
+        Map<String, Object> in = new LinkedHashMap<>();
+        in.put("text", st.caseRow().content());
+        List<Map<String, Object>> picks = new ArrayList<>();
+        for (Answer.Pick p : picked.picks()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("key", p.key());
+            m.put("label", p.label());
+            m.put("title", p.title());
+            m.put("law", p.lawName());
+            m.put("why", p.why());
+            picks.add(m);
+        }
+        in.put("picks", picks);
+        List<Map<String, Object>> arts = new ArrayList<>();
+        for (Answer.Source s : picked.sources()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("key", s.key());
+            m.put("doc", s.doc());
+            m.put("label", s.label());
+            m.put("title", s.title());
+            m.put("text", s.excerpt());
+            arts.add(m);
+        }
+        in.put("articles", arts);
+        List<Map<String, Object>> gs = new ArrayList<>();
+        for (Answer.Guide g : picked.guides()) {
+            gs.add(Map.of("section_id", g.sectionId(), "doc", String.valueOf(g.doc()), "title", String.valueOf(g.path())));
+        }
+        in.put("guides", gs);
+        LlmResult<GeneralText> r = llm.call(PROMPT_TEXT, in, GeneralText.class, out -> checkText(picked, out),
+                new CallContext(caseId, null, deadline, false));
+        return lock.write(caseId, st.inputMark(), STEP, NAME_TEXT, null, () -> {
+            Object out = r.ok() ? r.value() : Map.of("error", String.valueOf(r.lastError()));
+            int seq = store.addStep(NewStep.llm(caseId, STEP, NAME_TEXT, in, out, at, null, r.promptId(),
+                    r.promptVersion(), r.model(), r.temperature(), code.value(), r.status().name(), r.attempts()));
+            SpecificAnswerStep.linkCalls(jdbc, caseId, seq, r.callIds());
+            return new TextResult(r.status(), r.ok() ? r.value() : null, List.of(seq), r.callIds(),
+                    r.ok() ? null : r.lastError());
+        });
+    }
     public static final int MAX_PICKS = 5;
 
     public record Result(LlmResult.Status status, Answer answer, List<Integer> steps, List<Long> callIds, String error,
@@ -153,6 +241,7 @@ public class GeneralAnswerStep {
         }
         boolean conclusive = reasons.isEmpty();
         return new Answer(Answer.GENERAL, null, "TODAY", String.valueOf(list.date()), false, conclusive, null, null,
-                List.copyOf(picks), out.noBasis(), out.reason(), List.copyOf(sources), null, List.copyOf(guides), reasons);
+                List.copyOf(picks), out.noBasis(), out.reason(), List.copyOf(sources), null, List.copyOf(guides), reasons,
+                null, null);
     }
 }

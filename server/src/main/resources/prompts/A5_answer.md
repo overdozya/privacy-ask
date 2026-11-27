@@ -1,5 +1,5 @@
-<!-- version: 2; max_output_tokens: 16384; thinking: low -->
-이 단계는 답변(A5, 구체 사안)이다. 코드가 이미 정한 흐름별 쟁점·등급(`flows[].issues`)마다, 사실(`flows[].facts`)과 처리 원장 대조 결과(`flows[].ledger`, 행 글은 `ledger_rows`)와 그 쟁점 꾸러미의 원문(`sources`, 쟁점마다 쓸 수 있는 키는 `flows[].issues[].keys`)만 보고 현업 담당자에게 줄 의견과 조치를 쓴다. 쟁점·등급·출구는 코드가 정했으니 바꾸거나 더하지 않는다.
+<!-- version: 3; max_output_tokens: 16384; thinking: low -->
+이 단계는 답변(A5, 구체 사안)이다. 입력은 사실 목록 `fact_ids`, 꾸러미 원문 `sources`가 앞에 오고 사안 글·사실·쟁점이 뒤에 온다. 코드가 이미 정한 흐름별 쟁점·등급(`flows[].issues`)마다, 사실(`flows[].facts`)과 처리 원장 대조 결과(`flows[].ledger`, 행 글은 `ledger_rows`)와 그 쟁점 꾸러미의 원문(`sources`, 쟁점마다 쓸 수 있는 키는 `flows[].issues[].keys`)만 보고 현업 담당자에게 줄 의견과 조치를 쓴다. 쟁점·등급·출구는 코드가 정했으니 바꾸거나 더하지 않는다.
 
 쟁점마다 `issues`에 하나씩(빠뜨리지 않고, 두 번 내지 않는다):
 - `flow`, `issue`: 입력의 흐름 번호와 쟁점 이름 그대로.
@@ -10,7 +10,8 @@
 - `conclusive`: 이 쟁점의 결론이 지금 사실과 원문만으로 하나로 정해지면 true, 사실이 더 필요하거나 원문 해석이 갈리면 false.
 
 부족한 점은 `gaps`에(없으면 빈 목록):
-- `FACT_MISSING`: 결론에 필요한 사실을 모른다. `facts`에 그 사실 ID(`flows[].facts[].fact` 또는 `fact_ids`에 있는 ID)를 적는다.
+- `FACT_MISSING`: 결론에 필요한 사실을 아직 모른다. `facts`에는 이 사안에서 아직 정해지지 않은 사실(`flows[].facts`에 없거나 `status`가 `UNKNOWN`인 것)의 ID만 적는다(`fact_ids`의 ID).
+- `DETAIL_NEEDED`: 사실은 답했지만(예: '예'라고 함) 무엇인지·얼마나인지 더 봐야 결론이 선다. `facts`에 그 이미 정해진 사실의 ID를 적는다. 이것은 '확인 필요' 표시로만 쓰인다.
 - `INTERPRETATION`: 원문은 있지만 이 사안에 어떻게 적용할지 해석이 갈린다(예: '필요한 범위', '합리적으로 관련된').
 - `OUTSIDE_PACKAGE`: 결론에 이 꾸러미에 없는 조문이 필요하다. `note`에 필요한 조문을 적는다(키를 짓지 않는다).
 - `flow`·`issue`는 그 부족이 걸린 쟁점(사안 전체면 비운다), `note`는 한 줄.

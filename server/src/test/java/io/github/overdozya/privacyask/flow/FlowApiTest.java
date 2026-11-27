@@ -105,6 +105,8 @@ class FlowApiTest {
         routes.put("A5_general", r -> FakeProvider.ok(
                 "{\"picks\":[{\"key\":\"개인정보보호법|26|\",\"why\":\"위탁 문서 기재 사항\"}],\"no_basis\":false,"
                         + "\"reason\":\"위탁 계약서에 무엇을 적는지 묻는 일반 질문\"}"));
+        routes.put("A5_general_answer", r -> FakeProvider.ok(
+                "{\"answer\":\"손으로 쓴 답 문장.\",\"cites\":[\"개인정보보호법|26|\"]}"));
     }
 
     /** S8 A5 손 출력: 넘긴 흐름·쟁점마다 첫 원문 키를 인용하고, 그 흐름 원장 대조의 첫 행을 단다(conclusive는 인자). 받은 입력대로 짓는다. */
@@ -516,14 +518,16 @@ class FlowApiTest {
         assertThat(discarded).isEqualTo(1L);
         assertThat(jdbc.sql("SELECT COUNT(*) FROM steps WHERE case_id=? AND step='A1'").param(id).query(Long.class)
                 .single()).isZero();
-        // S8: A0 → A5 일반(G2) 직렬. 결과는 고른 조의 원문(코드가 붙임)
-        assertThat(r.body().get("timing").get("llm_depth").asInt()).isEqualTo(2);
+        // S8: A0 → A5 일반(G2) → (S8b) 답 문장 직렬. 결과는 고른 조의 원문(코드가 붙임) + 답 문장
+        assertThat(r.body().get("timing").get("llm_depth").asInt()).isEqualTo(3);
         JsonNode ans = r.body().get("result").get("answer");
         assertThat(ans.get("kind").asString()).isEqualTo("GENERAL");
         assertThat(ans.get("picks").get(0).get("key").asString()).isEqualTo("개인정보보호법|26|");
         assertThat(ans.get("sources").size()).isPositive();
         assertThat(ans.get("sources")).allSatisfy(x -> assertThat(x.get("key").asString()).startsWith("개인정보보호법|26|"));
         assertThat(r.body().get("result").get("exit_type").asString()).isEqualTo("ANSWER");
+        assertThat(ans.get("answer_text").asString()).isEqualTo("손으로 쓴 답 문장.");
+        assertThat(Condition.strings(ans.get("answer_cites"))).containsExactly("개인정보보호법|26|");
         assertThat(get("/api/cases/" + id).body().get("last").get("result").get("answer").get("kind").asString())
                 .isEqualTo("GENERAL");
     }
@@ -744,5 +748,24 @@ class FlowApiTest {
         assertThat(again.body().get("outcome").asString()).isEqualTo("GENERAL");
         assertThat(again.body().get("result").get("exit_type").asString()).isEqualTo("TRANSFER");
         assertThat(again.body().get("result").get("exit_reasons").get(0).get("code").asString()).isEqualTo("NO_BASIS");
+        // 고른 조가 없으면 답 문장은 LLM 없이 건너뜀(코드 단계)
+        assertThat(outcomes(id, "A5_general_answer")).isEmpty();
+        assertThat(again.body().get("result").get("answer").get("answer_text").isNull()).isTrue();
+        assertThat(jdbc.sql("SELECT actor FROM steps WHERE case_id=? AND name='답변 문장(일반 질의)'").param(id)
+                .query(String.class).list()).containsExactly("CODE");
+    }
+
+    /** S8b: 일반 답 문장이 고른 조 밖 키를 인용 → 거절 → 다시 → RETRY_OK. */
+    @Test
+    void generalTextOutsidePicksRejectedThenRetryOk() throws Exception {
+        routes.put("A0_intake", r -> FakeProvider.ok("{\"signals\":[]}"));
+        routes.put("A5_general_answer", r -> FakeProvider.ok(r.user().contains("[다시 요청]")
+                ? "{\"answer\":\"고친 답.\",\"cites\":[\"개인정보보호법|26|1||\"]}"
+                : "{\"answer\":\"답.\",\"cites\":[\"개인정보보호법|17|\"]}"));
+        Res r = create();
+        assertThat(r.status()).as(String.valueOf(r.body())).isEqualTo(200);
+        String id = r.body().get("case_id").asString();
+        assertThat(outcomes(id, "A5_general_answer")).containsExactly("CHECK_FAIL", "OK");
+        assertThat(r.body().get("result").get("answer").get("answer_text").asString()).isEqualTo("고친 답.");
     }
 }

@@ -384,6 +384,15 @@ public class TurnService {
                         throw llmFailed(ctx, a, r.error());
                     }
                 }
+                case A5_GENERAL_TEXT -> {
+                    Answer picked = generalPicks(ctx.caseId);
+                    GeneralAnswerStep.TextResult r = llmStage(ctx, () -> stages.general().runText(st, picked,
+                            ctx.deadline), GeneralAnswerStep.TextResult::callIds);
+                    ctx.steps.addAll(r.steps());
+                    if (r.failed()) {
+                        throw llmFailed(ctx, a, r.error());
+                    }
+                }
                 case END_GENERAL -> {
                     return base(st, TurnResult.GENERAL, null, storedGeneral(ctx.caseId));
                 }
@@ -669,10 +678,29 @@ public class TurnService {
         return r.withAnswer(a);
     }
 
-    /** 일반 문의 답(마지막 A5 일반 단계). */
-    TurnResult.Result storedGeneral(String caseId) {
+    Answer generalPicks(String caseId) {
         JsonNode o = lastOutput(caseId, GeneralAnswerStep.STEP, GeneralAnswerStep.NAME);
-        return o == null ? null : TurnResult.general(json.treeToValue(o, Answer.class));
+        return o == null ? null : json.treeToValue(o, Answer.class);
+    }
+
+    /** 일반 문의 답(마지막 A5 일반 단계 + 그 뒤 답 문장 단계, S8b). */
+    TurnResult.Result storedGeneral(String caseId) {
+        Answer a = generalPicks(caseId);
+        if (a == null) {
+            return null;
+        }
+        JsonNode t = jdbc.sql("""
+                SELECT s.output_json FROM steps s WHERE s.case_id=? AND s.step=? AND s.name=? AND s.status IN ('OK','RETRY_OK')
+                  AND s.seq > (SELECT MAX(p.seq) FROM steps p WHERE p.case_id=? AND p.step=? AND p.name=?
+                               AND p.status IN ('OK','RETRY_OK'))
+                ORDER BY s.seq DESC LIMIT 1""").params(caseId, GeneralAnswerStep.STEP, GeneralAnswerStep.NAME_TEXT, caseId,
+                GeneralAnswerStep.STEP, GeneralAnswerStep.NAME).query(String.class).optional().map(json::readTree)
+                .orElse(null);
+        if (t != null && t.hasNonNull("answer")) {
+            GeneralAnswerStep.GeneralText g = json.treeToValue(t, GeneralAnswerStep.GeneralText.class);
+            a = a.withText(g.answer(), g.cites());
+        }
+        return TurnResult.general(a);
     }
 
     /** (afterStep, afterName)의 마지막 OK 단계 뒤에 쓴 (step, name) 마지막 OK 단계 출력 → 답. 1문장. */

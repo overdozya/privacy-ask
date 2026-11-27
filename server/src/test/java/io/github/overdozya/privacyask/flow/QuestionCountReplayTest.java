@@ -81,6 +81,7 @@ class QuestionCountReplayTest {
                     case "A0_intake" -> FakeProvider.ok("{\"signals\":[{\"kind\":\"OWN_CASE\",\"quote\":\"T 멤버십 회원에게\"}]}");
                     case "A1_facts" -> FakeProvider.ok(exA1);
                     case "A3_ledger" -> FlowApiTest.ledgerCites(r);
+                    case "A5_answer", "A5_general", "A5_general_answer" -> a5(r);
                     default -> FakeProvider.ok("{\"flags\":[]}");
                 });
                 rows.put("예시 사안", run(exContent, null, null, Map.of("1:F-T4", "아니오", "1:F-C2", "잘 모르겠음",
@@ -111,6 +112,16 @@ class QuestionCountReplayTest {
                     .append(m.get("exit")).append(m.get("reasons")).append("; ");
         });
         return sb.toString();
+    }
+
+    /** S8b: A5 손 출력(질문 수·등급·출구와 무관). 구체는 넘긴 쟁점마다 첫 키 인용, 일반은 보호법 제26조. */
+    static ProviderResponse a5(ProviderRequest r) {
+        return switch (r.promptId()) {
+            case "A5_answer" -> FakeProvider.ok(FlowApiTest.answerFromInput(r, false));
+            case "A5_general" -> FakeProvider.ok("{\"picks\":[{\"key\":\"개인정보보호법|26|\",\"why\":\"위탁\"}],"
+                    + "\"no_basis\":false,\"reason\":\"재생 손 출력\"}");
+            default -> FakeProvider.ok("{\"answer\":\"재생 손 출력.\",\"cites\":[\"개인정보보호법|26|\"]}");
+        };
     }
 
     /** 재생: 저장한 모델 출력. A1 자유 답이 받은 질문 사실을 안 내면 unanswered에 넣고, 원장 인용은 저장한 것 + 나머지 없음. */
@@ -162,6 +173,7 @@ class QuestionCountReplayTest {
                 }
                 yield FakeProvider.ok(out.toString());
             }
+            case "A5_answer", "A5_general", "A5_general_answer" -> a5(r);   // S8b: 답은 질문 수와 무관, 손 출력
             default -> FakeProvider.ok("{\"flags\":[]}");   // 감시는 질문 수와 무관: 표시 없음으로(저장한 표시는 그때 쟁점 기준)
         };
     }

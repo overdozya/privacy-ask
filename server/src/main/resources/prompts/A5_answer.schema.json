@@ -26,7 +26,7 @@
       "items": {
         "type": "object",
         "properties": {
-          "kind": { "type": "string", "enum": ["FACT_MISSING", "INTERPRETATION", "OUTSIDE_PACKAGE"] },
+          "kind": { "type": "string", "enum": ["FACT_MISSING", "DETAIL_NEEDED", "INTERPRETATION", "OUTSIDE_PACKAGE"] },
           "flow": { "type": ["integer", "null"], "minimum": 1, "maximum": 20 },
           "issue": { "type": ["string", "null"], "maxLength": 60 },
           "facts": { "type": "array", "maxItems": 10, "items": { "type": "string", "minLength": 1, "maxLength": 10 } },

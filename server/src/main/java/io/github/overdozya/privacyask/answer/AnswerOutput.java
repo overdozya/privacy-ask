@@ -5,7 +5,7 @@ import java.util.List;
 /** A5 구체 답변 LLM 출력(prompts/A5_answer.schema.json). 인용은 원문 키(cites)와 원장 행 ID(ledgerRows)로만. */
 public record AnswerOutput(List<IssueOut> issues, List<GapOut> gaps) {
     public static final String FACT_MISSING = "FACT_MISSING", INTERPRETATION = "INTERPRETATION",
-            OUTSIDE_PACKAGE = "OUTSIDE_PACKAGE";
+            OUTSIDE_PACKAGE = "OUTSIDE_PACKAGE", DETAIL_NEEDED = "DETAIL_NEEDED";
 
     public record IssueOut(int flow, String issue, String opinion, List<String> actions, List<String> cites,
                            List<String> ledgerRows, boolean conclusive) {

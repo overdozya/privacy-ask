@@ -133,7 +133,8 @@ public class GeminiProvider implements LlmProvider {
                 intOrNull(usage, "candidatesTokenCount"),
                 intOrNull(usage, "thoughtsTokenCount"),
                 status, latency,
-                root.path("modelVersion").asString(null));
+                root.path("modelVersion").asString(null),
+                intOrNull(usage, "cachedContentTokenCount"));
     }
 
     private static Integer intOrNull(JsonNode n, String field) {

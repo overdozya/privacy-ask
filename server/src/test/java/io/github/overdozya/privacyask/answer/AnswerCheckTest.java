@@ -72,8 +72,11 @@ class AnswerCheckTest {
         return out;
     }
 
+    /** 정해진 사실: 흐름 1의 F-D1(손으로 둠). 그 밖은 모름. */
+    static final SpecificAnswerStep.Known KNOWN = (flow, fact) -> "F-D1".equals(fact) && (flow == null || flow == 1);
+
     static String check(List<AnswerOutput.IssueOut> issues, List<AnswerOutput.GapOut> gaps) {
-        return SpecificAnswerStep.check(k, null, flows, opened.keys(), ROWS, new AnswerOutput(issues, gaps));
+        return SpecificAnswerStep.check(k, KNOWN, flows, opened.keys(), ROWS, new AnswerOutput(issues, gaps));
     }
 
     static List<AnswerOutput.IssueOut> replaceFirst(AnswerOutput.IssueOut x) {
@@ -128,6 +131,30 @@ class AnswerCheckTest {
                 .contains("gap 흐름 3 없음");
         assertThat(check(good(true), List.of(new AnswerOutput.GapOut("INTERPRETATION", 1, "목적 외 이용", List.of(), "x"))))
                 .as("흐름 1에는 목적 외 이용이 없음").contains("없음");
+    }
+
+    /** S8b: FACT_MISSING은 아직 모르는 사실만, 정해진 사실의 '무엇인지'는 DETAIL_NEEDED. */
+    @Test
+    void factMissingOnlyUnknownDetailNeededOnlyKnown() {
+        assertThat(check(good(true), List.of(new AnswerOutput.GapOut("FACT_MISSING", 1, null, List.of("F-D1"), "x"))))
+                .contains("이미 정해짐");
+        assertThat(check(good(true), List.of(new AnswerOutput.GapOut("DETAIL_NEEDED", 1, null, List.of("F-C2"), "x"))))
+                .contains("아직 모름");
+        assertThat(check(good(true), List.of(new AnswerOutput.GapOut("DETAIL_NEEDED", 1, null, List.of("F-D1"), "x"),
+                new AnswerOutput.GapOut("FACT_MISSING", 1, null, List.of("F-C2"), "y")))).isNull();
+        // DETAIL_NEEDED: 확인 필요 표시만(질문·이관 사유 없음, 확정 여부 안 바꿈)
+        SpecificAnswerStep.Askable[] asked = new SpecificAnswerStep.Askable[1];
+        Answer a = SpecificAnswerStep.answer(k, null, flows, opened, REF, new AnswerOutput(good(true), List.of(
+                new AnswerOutput.GapOut("DETAIL_NEEDED", 1, null, List.of("F-D1"), "어떤 정보인지"))),
+                List.of(new SpecificAnswerStep.Askable(1, "F-D1")), asked);
+        assertThat(asked[0]).isNull();
+        assertThat(a.addedReasons()).isEmpty();
+        assertThat(a.gaps().get(0).handled()).isEqualTo("NOTE");
+        assertThat(a.issues().stream().filter(i -> i.flow() == 1)).allSatisfy(i -> {
+            assertThat(i.conclusive()).isTrue();
+            assertThat(i.checks()).containsExactly("F-D1: 어떤 정보인지");
+        });
+        assertThat(a.conclusive()).isTrue();
     }
 
     @Test

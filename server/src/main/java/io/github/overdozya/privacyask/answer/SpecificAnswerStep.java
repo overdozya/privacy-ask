@@ -90,7 +90,7 @@ public class SpecificAnswerStep {
         Map<String, Object> in = input(k, st, flows, opened, ref);
         Set<String> rows = ledgerRowIds(st);
         LlmResult<AnswerOutput> r = llm.call(PROMPT, in, AnswerOutput.class,
-                out -> check(k, st, flows, opened.keys(), rows, out),
+                out -> check(k, known(st), flows, opened.keys(), rows, out),
                 new CallContext(st.caseRow().caseId(), null, deadline, false));
         int chars = json.writeValueAsString(in).length();
         return save(st, in, r, flows, opened, ref, askable, chars);
@@ -112,7 +112,30 @@ public class SpecificAnswerStep {
 
     Map<String, Object> input(KnowledgeSnapshot k, CaseState st, List<FlowIn> flows, PackageOpener.Opened opened,
                               PackageOpener.RefDate ref) {
+        // S8b: 사안과 무관한 사실 목록, 그다음 꾸러미 원문을 앞에(같은 꾸러미면 재시도·gap 질문 뒤 다시 보낼 때 앞부분이 같아 공급자 캐시가 맞게), 사실·쟁점은 뒤
         Map<String, Object> in = new LinkedHashMap<>();
+        List<Map<String, Object>> ids = new ArrayList<>();
+        for (Catalog.Fact f : k.catalog().facts()) {
+            if (!isLedgerFact(f.factId())) {
+                ids.add(Map.of("fact", f.factId(), "question", f.question()));
+            }
+        }
+        in.put("fact_ids", ids);
+        List<Map<String, Object>> src = new ArrayList<>();
+        for (PackageOpener.Source s : opened.sources().values()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("key", s.key());
+            m.put("kind", s.kind());
+            m.put("doc", s.docTitle());
+            m.put("label", s.label());
+            m.put("title", s.title());
+            if (s.hasUpcoming()) {
+                m.put("upcoming", s.upcoming().stream().map(u -> String.valueOf(u.effectiveFrom())).toList());
+            }
+            m.put("text", s.text());
+            src.add(m);
+        }
+        in.put("sources", src);
         in.put("text", st.caseRow().content());
         in.put("answers", st.turns().stream().filter(t -> "USER".equals(t.role()) && t.text() != null)
                 .map(CaseState.Turn::text).toList());
@@ -191,28 +214,6 @@ public class SpecificAnswerStep {
             });
         }
         in.put("ledger_rows", rows);
-        List<Map<String, Object>> src = new ArrayList<>();
-        for (PackageOpener.Source s : opened.sources().values()) {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("key", s.key());
-            m.put("kind", s.kind());
-            m.put("doc", s.docTitle());
-            m.put("label", s.label());
-            m.put("title", s.title());
-            if (s.hasUpcoming()) {
-                m.put("upcoming", s.upcoming().stream().map(u -> String.valueOf(u.effectiveFrom())).toList());
-            }
-            m.put("text", s.text());
-            src.add(m);
-        }
-        in.put("sources", src);
-        List<Map<String, Object>> ids = new ArrayList<>();
-        for (Catalog.Fact f : k.catalog().facts()) {
-            if (!isLedgerFact(f.factId())) {
-                ids.add(Map.of("fact", f.factId(), "question", f.question()));
-            }
-        }
-        in.put("fact_ids", ids);
         return in;
     }
 
@@ -285,7 +286,28 @@ public class SpecificAnswerStep {
     // ───────── 업무 검사 ─────────
 
     /** 통과면 null. */
-    static String check(KnowledgeSnapshot k, CaseState st, List<FlowIn> flows, Set<String> keys, Set<String> rows,
+    /** 사실이 정해졌나(지금 판이 NOT_FOUND·UNKNOWN이 아님). 흐름이 비면 모든 흐름(흐름이 없으면 공통)에서 정해졌을 때. */
+    public interface Known {
+        boolean test(Integer flow, String fact);
+    }
+
+    static Known known(CaseState st) {
+        return (flow, fact) -> {
+            if (flow != null) {
+                return decided(st.current(flow, fact));
+            }
+            if (st.flows().isEmpty()) {
+                return decided(st.current(null, fact));
+            }
+            return st.flows().stream().allMatch(f -> decided(st.current(f.flowNo(), fact)));
+        };
+    }
+
+    static boolean decided(java.util.Optional<CaseState.Fact> f) {
+        return f.isPresent() && !"NOT_FOUND".equals(f.get().status()) && !"UNKNOWN".equals(f.get().status());
+    }
+
+    static String check(KnowledgeSnapshot k, Known known, List<FlowIn> flows, Set<String> keys, Set<String> rows,
                         AnswerOutput out) {
         List<String> bad = new ArrayList<>();
         Map<String, Integer> seen = new LinkedHashMap<>();
@@ -330,12 +352,18 @@ public class SpecificAnswerStep {
                     p.endsWith("|" + g.issue()) && (g.flow() == null || p.startsWith(g.flow() + "|")))) {
                 bad.add("gap 쟁점 '" + g.issue() + "' 없음");
             }
-            if (AnswerOutput.FACT_MISSING.equals(g.kind()) && g.facts().isEmpty()) {
-                bad.add("FACT_MISSING인데 사실 ID 없음");
+            boolean missing = AnswerOutput.FACT_MISSING.equals(g.kind());
+            boolean detail = AnswerOutput.DETAIL_NEEDED.equals(g.kind());
+            if ((missing || detail) && g.facts().isEmpty()) {
+                bad.add(g.kind() + "인데 사실 ID 없음");
             }
             for (String f : g.facts()) {
                 if (k.catalog().fact(f).isEmpty() || isLedgerFact(f)) {
                     bad.add("gap 사실 '" + f + "'는 사실 목록 밖");
+                } else if (missing && known.test(g.flow(), f)) {
+                    bad.add("FACT_MISSING 사실 '" + f + "'는 이미 정해짐(무엇인지 더 알아야 하면 DETAIL_NEEDED)");
+                } else if (detail && !known.test(g.flow(), f)) {
+                    bad.add("DETAIL_NEEDED 사실 '" + f + "'는 아직 모름(FACT_MISSING)");
                 }
             }
         }
@@ -351,7 +379,9 @@ public class SpecificAnswerStep {
         List<Answer.AddedReason> reasons = baseReasons(ref);
         for (AnswerOutput.GapOut g : out.gaps()) {
             String handled = HANDLED_NONE;
-            if (AnswerOutput.FACT_MISSING.equals(g.kind())) {
+            if (AnswerOutput.DETAIL_NEEDED.equals(g.kind())) {
+                handled = HANDLED_NOTE;
+            } else if (AnswerOutput.FACT_MISSING.equals(g.kind())) {
                 Askable hit = asked[0] == null ? match(g, askable) : null;
                 if (hit != null) {
                     asked[0] = hit;
@@ -366,7 +396,8 @@ public class SpecificAnswerStep {
             }
             gaps.add(new Answer.Gap(g.kind(), g.flow(), blankToNull(g.issue()), g.facts(), g.note(), handled));
         }
-        boolean caseGap = gaps.stream().anyMatch(g -> g.flow() == null && g.issue() == null);
+        boolean caseGap = gaps.stream().anyMatch(g -> g.flow() == null && g.issue() == null
+                && !AnswerOutput.DETAIL_NEEDED.equals(g.kind()));
         List<Answer.IssueAnswer> issues = new ArrayList<>();
         List<String> citeOrder = new ArrayList<>();
         Map<String, String> roleOf = new LinkedHashMap<>();
@@ -375,7 +406,7 @@ public class SpecificAnswerStep {
             for (IssueIn i : f.issues()) {
                 AnswerOutput.IssueOut o = out.issues().stream()
                         .filter(x -> x.flow() == f.flow() && x.issue().equals(i.issue())).findFirst().orElseThrow();
-                List<String> why = new ArrayList<>();
+                List<String> why = new ArrayList<>(), checks = new ArrayList<>();
                 if (!o.conclusive()) {
                     why.add("모델이 미확정으로 냄");
                 }
@@ -385,13 +416,16 @@ public class SpecificAnswerStep {
                 for (Answer.Gap g : gaps) {
                     boolean mine = (g.flow() == null || g.flow() == f.flow())
                             && (g.issue() == null || g.issue().equals(i.issue()));
-                    if (mine) {
+                    if (mine && AnswerOutput.DETAIL_NEEDED.equals(g.kind())) {
+                        checks.add(String.join("·", g.facts()) + ": " + g.note());   // 확인 필요 표시만(확정 여부·출구 안 바꿈)
+                    } else if (mine) {
                         why.add("gap " + g.kind() + (g.issue() == null ? "(사안 전체)" : ""));
                     }
                 }
                 boolean conclusive = why.isEmpty();
                 issues.add(new Answer.IssueAnswer(f.flow(), i.issue(), i.packageId(), i.grade(), o.opinion(),
-                        o.actions(), o.cites(), o.ledgerRows(), o.conclusive(), conclusive, List.copyOf(new LinkedHashSet<>(why))));
+                        o.actions(), o.cites(), o.ledgerRows(), o.conclusive(), conclusive, List.copyOf(new LinkedHashSet<>(why)),
+                        List.copyOf(checks)));
                 PackageOpener.OpenedIssue oi = openedIssue(opened, i);
                 for (String c : o.cites()) {
                     if (!citeOrder.contains(c)) {
@@ -419,10 +453,11 @@ public class SpecificAnswerStep {
         boolean all = !caseGap && issues.stream().allMatch(Answer.IssueAnswer::conclusive);
         return new Answer(Answer.SPECIFIC, ref.caseDate() == null ? null : String.valueOf(ref.caseDate()),
                 ref.basis(), String.valueOf(ref.openDate()), ref.past(), all, List.copyOf(issues), List.copyOf(gaps),
-                null, null, null, List.copyOf(sources), List.copyOf(rows), null, reasons);
+                null, null, null, List.copyOf(sources), List.copyOf(rows), null, reasons, null, null);
     }
 
-    public static final String HANDLED_QUESTION = "QUESTION", HANDLED_REASON = "REASON", HANDLED_NONE = "NONE";
+    public static final String HANDLED_QUESTION = "QUESTION", HANDLED_REASON = "REASON", HANDLED_NONE = "NONE",
+            HANDLED_NOTE = "NOTE";
 
     /** 사실 부족 gap의 사실 중 A2 후보에 있는 첫 것(후보 순서 = A2 순서). gap 흐름이 비면 어느 흐름이든. */
     static Askable match(AnswerOutput.GapOut g, List<Askable> askable) {
