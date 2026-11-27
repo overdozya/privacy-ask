@@ -67,7 +67,10 @@ class S8LiveRunTest {
         JsonNode spec = json.readTree(Files.readString(file));
         List<String> only = System.getenv("S8_ONLY") == null ? List.of() : List.of(System.getenv("S8_ONLY").split(","));
         boolean compare = !"0".equals(System.getenv("S8_COMPARE"));
-        PromptCatalog alt = PromptCatalog.load("file:" + flippedDir(), json);
+        // S8_ALT_SAME=1(S8b 캐시 확인): 견주는 호출을 지금 프롬프트 그대로 보내고 첫 시도를 일부러 한 번 거절해 진짜 재시도(같은 글 + 끝에 거절 이유)를 만든다
+        boolean same = "1".equals(System.getenv("S8_ALT_SAME"));
+        List<String> altOnly = System.getenv("S8_ALT_ONLY") == null ? List.of() : List.of(System.getenv("S8_ALT_ONLY").split(","));
+        PromptCatalog alt = same ? gateway.prompts() : PromptCatalog.load("file:" + flippedDir(), json);
         // 견주는 호출은 호출 상한을 S8_ALT_TIMEOUT(기본 90초)으로 늘려 실제 지연을 잰다(흐름의 20초 상한과 따로)
         Duration altTimeout = Duration.parse("PT" + System.getenv().getOrDefault("S8_ALT_TIMEOUT", "90") + "S");
         LlmProperties altProps = new LlmProperties(props.provider(), props.model(), props.temperature(), props.apiKey(),
@@ -110,7 +113,8 @@ class S8LiveRunTest {
                 run.put("result", r.result());
             }
             run.put("calls", calls(caseId));
-            if (compare && caseId != null) {
+            if (compare && caseId != null && (altOnly.isEmpty() || altOnly.contains(id))) {
+                rejectFirst[0] = same;
                 run.put("alt", alt(caseId, altGw, alt, altTimeout));
             }
             runs.add(run);
@@ -126,6 +130,8 @@ class S8LiveRunTest {
         Files.writeString(dst, json.writerWithDefaultPrettyPrinter().writeValueAsString(out));
         System.out.println("S8 live 결과: " + dst.toAbsolutePath() + " 사안 " + runs.size());
     }
+
+    static final boolean[] rejectFirst = new boolean[1];
 
     static Map<String, Object> turnRow(String kind, TurnResult r) {
         Map<String, Object> m = new LinkedHashMap<>();
@@ -162,7 +168,8 @@ class S8LiveRunTest {
         }
         return jdbc.sql("""
                 SELECT call_id, prompt_id, prompt_version, attempt_no, outcome, latency_ms, prompt_tokens, output_tokens,
-                       thought_tokens, finish_reason, discarded, step_seq FROM llm_call_logs WHERE case_id=? ORDER BY call_id""")
+                       thought_tokens, cached_tokens, finish_reason, discarded, step_seq FROM llm_call_logs WHERE case_id=?
+                ORDER BY call_id""")
                 .param(caseId).query().listOfRows();
     }
 
@@ -182,7 +189,13 @@ class S8LiveRunTest {
         LlmResult<?> r;
         long t0 = System.nanoTime();
         if ("A5_answer".equals(promptId)) {
-            r = altGw.call(promptId, in, AnswerOutput.class, o -> check(in, o),
+            r = altGw.call(promptId, in, AnswerOutput.class, o -> {
+                        if (rejectFirst[0]) {
+                            rejectFirst[0] = false;
+                            return "캐시 확인용으로 첫 시도를 한 번 거절함(같은 답을 다시 내면 된다)";
+                        }
+                        return check(in, o);
+                    },
                     new CallContext(null, null, clock.now().plus(altTimeout.multipliedBy(2)), true));
         } else {
             // 일반 입력은 단계 기록에 목록 글 대신 판·크기만 있으므로 같은 날의 목록으로 다시 짓는다
@@ -198,8 +211,8 @@ class S8LiveRunTest {
         out.put("value", r.value());
         out.put("error", r.lastError());
         out.put("calls", jdbc.sql("""
-                SELECT call_id, attempt_no, outcome, latency_ms, prompt_tokens, output_tokens, thought_tokens, finish_reason
-                FROM llm_call_logs WHERE call_id IN (:ids) ORDER BY call_id""").param("ids", r.callIds()).query().listOfRows());
+                SELECT call_id, attempt_no, outcome, latency_ms, prompt_tokens, output_tokens, thought_tokens, cached_tokens,
+                       finish_reason FROM llm_call_logs WHERE call_id IN (:ids) ORDER BY call_id""").param("ids", r.callIds()).query().listOfRows());
         return out;
     }
 
@@ -225,7 +238,8 @@ class S8LiveRunTest {
 
     Map<String, String> versions(PromptCatalog c) {
         Map<String, String> m = new LinkedHashMap<>();
-        for (String id : List.of("A0_intake", "A1_facts", "A3_ledger", "A3_watch", "A5_answer", "A5_general")) {
+        for (String id : List.of("A0_intake", "A1_facts", "A3_ledger", "A3_watch", "A5_answer", "A5_general",
+                "A5_general_answer")) {
             m.put(id, c.get(id).versionTag());
         }
         return m;
