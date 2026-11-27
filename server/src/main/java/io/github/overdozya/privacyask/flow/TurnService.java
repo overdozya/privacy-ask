@@ -492,6 +492,7 @@ public class TurnService {
         out.put("evaluations", sel.evaluations());
         out.put("micros", sel.micros());
         out.put("impact", ask.map(a -> a.impact().name()).orElse(null));
+        out.put("raised", ask.map(QuestionSelector.Ask::raised).orElse(null));
         if (sel.capped()) {
             out.put("capped", "사안당 질문 상한 " + questions.selector().maxPerCase() + "에 닿아 그만 묻는다");
         }

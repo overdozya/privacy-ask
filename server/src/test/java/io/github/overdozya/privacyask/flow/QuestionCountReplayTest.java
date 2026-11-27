@@ -38,7 +38,8 @@ import tools.jackson.databind.node.ObjectNode;
 class QuestionCountReplayTest {
     static final JsonMapper JSON = JsonMapper.builder().build();
     static final Path INQ = LoadedDb.DATA.resolve("수집").resolve("S7_지은문의.json");
-    static final Path REPLAY = LoadedDb.DATA.resolve("수집").resolve("S7_재생.json");
+    static final Path REPLAY = Path.of(System.getenv().getOrDefault("S7_REPLAY_FILE",
+            LoadedDb.DATA.resolve("수집").resolve("S7_재생.json").toString()));
 
     static volatile JsonNode current;   // 지금 돌리는 문의의 재생 출력
     static String base;
@@ -120,9 +121,13 @@ class QuestionCountReplayTest {
             case "A0_intake" -> FakeProvider.ok(c.get("A0_intake").toString());
             case "A1_facts" -> {
                 if ("ANSWER".equals(in.get("source").asString())) {
-                    ObjectNode o = c.has("A1_answer") ? (ObjectNode) c.get("A1_answer").deepCopy()
-                            : (ObjectNode) JSON.readTree("{\"flows\":[],\"facts\":[]}");
                     String fact = in.get("question").get("fact").asString();
+                    // 저장한 자유 답 출력은 그 질문 사실에 대한 것일 때만(질문 차례가 바뀌면 다른 사실에 답함)
+                    boolean same = c.has("A1_answer") && c.get("A1_answer").get("facts").size() > 0
+                            && fact.equals(c.get("A1_answer").get("facts").get(0).get("fact").asString())
+                            && in.get("text").asString().contains(c.get("A1_answer").get("facts").get(0).get("quote").asString());
+                    ObjectNode o = same ? (ObjectNode) c.get("A1_answer").deepCopy()
+                            : (ObjectNode) JSON.readTree("{\"flows\":[],\"facts\":[]}");
                     boolean has = false;
                     for (JsonNode f : o.get("facts")) {
                         has |= fact.equals(f.get("fact").asString());
@@ -157,7 +162,7 @@ class QuestionCountReplayTest {
                 }
                 yield FakeProvider.ok(out.toString());
             }
-            default -> FakeProvider.ok(c.has("A3_watch") ? c.get("A3_watch").toString() : "{\"flags\":[]}");
+            default -> FakeProvider.ok("{\"flags\":[]}");   // 감시는 질문 수와 무관: 표시 없음으로(저장한 표시는 그때 쟁점 기준)
         };
     }
 
@@ -180,7 +185,9 @@ class QuestionCountReplayTest {
             a.put("question_turn", q.get("turn_no").asInt());
             if (free != null && free.get("at_question").asInt() == n) {
                 a.put("choices", List.of());
-                a.put("text", free.get("text").asString());
+                String fid = q.get("fact_id").asString();
+                a.put("text", free.has("by_fact") && free.get("by_fact").has(fid) ? free.get("by_fact").get(fid).asString()
+                        : free.get("text").asString());
             } else {
                 String c = fixed.get(key);
                 String detail = null;

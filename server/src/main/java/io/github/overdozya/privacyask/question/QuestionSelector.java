@@ -62,9 +62,13 @@ public final class QuestionSelector {
     }
 
     /** 고른 질문. why: 왜 물을 가치가 있나(단계 기록 output에 그대로). impact: 보기에 따라 무엇이 바뀌나(S7b). */
-    public record Ask(Integer flowNo, String factId, int askNo, String why, Impact impact) {
+    public record Ask(Integer flowNo, String factId, int askNo, String why, Impact impact, boolean raised) {
         public Ask(Integer flowNo, String factId, int askNo, String why) {
-            this(flowNo, factId, askNo, why, Impact.DETAIL);
+            this(flowNo, factId, askNo, why, Impact.DETAIL, false);
+        }
+
+        public Ask(Integer flowNo, String factId, int askNo, String why, Impact impact) {
+            this(flowNo, factId, askNo, why, impact, false);
         }
     }
 
@@ -74,7 +78,10 @@ public final class QuestionSelector {
      */
     public enum Impact { EXIT, ISSUE, GRADE, DETAIL }
 
-    /** 후보 순서(S7b): ORDER = 공통 → 흐름 → 사실 순서 그대로, IMPACT = Impact가 큰 것부터(같으면 ORDER 순). */
+    /**
+     * 후보 순서(S7b): ORDER = 공통 → 흐름 → 사실 순서 그대로, IMPACT = Impact가 큰 것부터, 같으면 문의·답이 이미 꺼낸 주제(raised:
+     * 그 사실의 슬롯에 문의·답에서 값이 정해진 다른 사실이 있음)부터, 그다음 ORDER 순.
+     */
     public enum Priority { ORDER, IMPACT }
 
     /**
@@ -241,12 +248,13 @@ public final class QuestionSelector {
                 run.considered++;
                 String why = run.worthFlow(i, f);
                 if (why != null) {
-                    worth.add(new Ask(flow.flowNo(), f.factId(), n + 1, why, run.lastImpact));
+                    worth.add(new Ask(flow.flowNo(), f.factId(), n + 1, why, run.lastImpact, raised(flow, f)));
                 }
             }
         }
         if (priority == Priority.IMPACT) {
-            worth.sort(java.util.Comparator.comparingInt(a -> a.impact().ordinal()));   // 안정 정렬: 같은 등급은 ORDER 순
+            // 안정 정렬: 같은 크기·같은 raised면 ORDER 순
+            worth.sort(java.util.Comparator.<Ask>comparingInt(a -> a.impact().ordinal()).thenComparing(a -> !a.raised()));
         }
         long micros = (System.nanoTime() - t0) / 1000;
         return new Selection(worth.stream().findFirst(), List.copyOf(worth), run.considered, run.evaluations, micros);
@@ -416,6 +424,28 @@ public final class QuestionSelector {
                 return false;
             });
         }
+    }
+
+    /** 그 흐름에서 이 사실의 슬롯에 문의·답(원장 아님)으로 값이 정해진 다른 사실이 있나 = 문의가 이미 꺼낸 주제. */
+    boolean raised(FlowFacts flow, Catalog.Fact f) {
+        if (f.slot() == null) {
+            return false;
+        }
+        Set<String> slots = new java.util.HashSet<>(List.of(f.slot().split("·")));
+        for (Catalog.Fact g : catalog.facts()) {
+            if (g.factId().equals(f.factId()) || g.common() || g.slot() == null) {
+                continue;
+            }
+            boolean same = false;
+            for (String sl : g.slot().split("·")) {
+                same |= slots.contains(sl);
+            }
+            FactState st = flow.fact(g.factId());
+            if (same && st.known() && !"LEDGER".equals(st.sourceKind())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static Impact impact(Set<String> exits, Set<String> names, Set<String> grades) {

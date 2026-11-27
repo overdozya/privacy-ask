@@ -233,7 +233,7 @@ class FlowApiTest {
         System.out.println("S7 예시 사안 질문: " + asked);
         System.out.println("S7 예시 사안 턴 timing: " + timings);
         // S7b 멈춤 규칙(IMPACT 순서, 상한 6): 같은 다섯 질문, 쟁점 이름을 바꾸는 F-C2가 조건만 바꾸는 F-T4보다 앞
-        assertThat(asked).containsExactly("1:F-C2#1", "1:F-C2#2", "2:F-B3#1", "2:F-C2#1", "1:F-T4#1");
+        assertThat(asked).containsExactly("1:F-C2#1", "1:F-C2#2", "2:F-C2#1", "2:F-B3#1", "1:F-T4#1");
         assertThat(r.body().get("outcome").asString()).isEqualTo("RESULT");
         JsonNode res = r.body().get("result");
         assertThat(res.get("preliminary").asBoolean()).isTrue();

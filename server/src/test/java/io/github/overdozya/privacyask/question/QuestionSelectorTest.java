@@ -347,7 +347,7 @@ class QuestionSelectorTest {
         }
         System.out.println("A2 IMPACT 예시 사안 질문: " + asked);
         assertThat(asked).extracting(x -> x.split(" ")[0])
-                .containsExactly("1:F-C2#1", "1:F-C2#2", "2:F-B3#1", "2:F-C2#1", "1:F-T4#1");
+                .containsExactly("1:F-C2#1", "1:F-C2#2", "2:F-C2#1", "2:F-B3#1", "1:F-T4#1");
         assertThat(asked.get(4)).endsWith("DETAIL");
     }
 }
