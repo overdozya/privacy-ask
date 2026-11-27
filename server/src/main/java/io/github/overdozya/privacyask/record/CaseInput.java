@@ -68,9 +68,22 @@ public final class CaseInput {
 
     public record PromptRef(String promptId, String version) {}
 
-    /** basisFacts = facts.fact_row_id. unknownFacts = 현업 미확인(UNKNOWN) 사실 ID. */
+    /**
+     * basisFacts = facts.fact_row_id. unknownFacts = 현업 미확인(UNKNOWN) 사실 ID.
+     * openFacts(S9, 메인 결정): 판정 때 OPEN으로 남아 UNKNOWN으로 적는 슬롯의 '막은 사실'(unknownFacts 안). 이 사실만은 C16이 지금 판이
+     * UNKNOWN이 아니어도(NOT_FOUND·행 없음) 받는다. 값이 있는 정해진 사실이면 그래도 거부한다. 비면 옛 규칙 그대로.
+     */
     public record SlotEntry(int flow, String slot, String status, List<String> values, List<Long> basisFacts,
-                            List<String> unknownFacts) {}
+                            List<String> unknownFacts, List<String> openFacts) {
+        public SlotEntry {
+            openFacts = openFacts == null ? List.of() : List.copyOf(openFacts);
+        }
+
+        public SlotEntry(int flow, String slot, String status, List<String> values, List<Long> basisFacts,
+                         List<String> unknownFacts) {
+            this(flow, slot, status, values, basisFacts, unknownFacts, List.of());
+        }
+    }
 
     public record IssueEntry(int flow, String issue, String packageId, String grade, List<String> ruleIds,
                              List<String> conditions, List<String> interpFlags, boolean conclusive, String opinion,

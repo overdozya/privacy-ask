@@ -550,7 +550,20 @@ public class CaseStore {
                     throw new Rejected("C16", "흐름 " + s.flow() + " " + s.slot() + ": 근거 사실 " + fr + "는 이 사안·흐름 것이 아님");
                 }
             }
+            if (!s.openFacts().isEmpty() && (!"UNKNOWN".equals(s.status()) || !s.unknownFacts().containsAll(s.openFacts()))) {
+                throw new Rejected("C16", "흐름 " + s.flow() + " " + s.slot() + ": OPEN 표시는 UNKNOWN 슬롯의 미확인 칸 사실에만");
+            }
             for (String fid : s.unknownFacts()) {
+                if (s.openFacts().contains(fid)) {
+                    // OPEN에서 온 슬롯의 막은 사실(S9): 지금 판이 없거나 NOT_FOUND·UNKNOWN이면 받음, 값이 있는 정해진 사실이면 거부
+                    if (exists("""
+                            SELECT 1 FROM facts_current WHERE case_id=? AND fact_id=? AND (flow_no=? OR flow_no IS NULL)
+                              AND status NOT IN ('NOT_FOUND','UNKNOWN')""", caseId, fid, s.flow())) {
+                        throw new Rejected("C16", "흐름 " + s.flow() + " " + s.slot() + ": OPEN 막은 사실 " + fid
+                                + "는 이미 정해진 사실");
+                    }
+                    continue;
+                }
                 if (!exists("""
                         SELECT 1 FROM facts_current WHERE case_id=? AND fact_id=? AND (flow_no=? OR flow_no IS NULL)
                           AND status='UNKNOWN'""", caseId, fid, s.flow())) {

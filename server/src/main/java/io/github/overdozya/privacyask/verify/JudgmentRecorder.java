@@ -18,7 +18,6 @@ import io.github.overdozya.privacyask.issues.CaseJudge;
 import io.github.overdozya.privacyask.issues.IssueDeriver;
 import io.github.overdozya.privacyask.issues.PreliminaryExit;
 import io.github.overdozya.privacyask.issues.SlotResult;
-import io.github.overdozya.privacyask.knowledge.Catalog;
 import io.github.overdozya.privacyask.knowledge.KnowledgeSnapshot;
 import io.github.overdozya.privacyask.record.CaseInput;
 import io.github.overdozya.privacyask.record.CaseInput.CitationEntry;
@@ -34,8 +33,8 @@ import io.github.overdozya.privacyask.record.CaseStore;
  * A8 판정 기록(03 4.2 A8, 06 2.1 V6). 한 트랜잭션에서 A8 단계 → case_judgments*(CaseStore.addJudgment, 거부 C11~C17 그대로) → 사안
  * 상태 JUDGED(즉답)·TRANSFERRED(이관) + closed_at.
  *
- * <p>OPEN 슬롯(메인 결정): 판정 행에는 UNKNOWN(값이 있는 복수 슬롯은 PARTIAL)으로 적고 막은 사실을 미확인 칸에 더한다. 값이 있는 단일 슬롯이
- * OPEN이면 C14(UNKNOWN은 값 없음) 때문에 값은 flags.open_slots에만 남긴다.
+ * <p>OPEN 슬롯(메인 결정): 판정 행에는 UNKNOWN으로 적고 막은 사실을 미확인 칸에 더한다(SlotEntry.openFacts = 'OPEN에서 옴' 표시,
+ * C16이 그 사실만은 NOT_FOUND·행 없음도 받음). 값이 있었으면 C14(UNKNOWN은 값 없음) 때문에 값은 flags.open_slots에만 남긴다.
  * 응답을 판정 테이블에서 다시 지을 수 있게 flags에 구조로 된 사유·흐름별 켜진 규칙·슬롯 표시·하위 꾸러미 해석 쟁점·unasked를 둔다.
  */
 public final class JudgmentRecorder {
@@ -111,22 +110,20 @@ public final class JudgmentRecorder {
                 List<String> values = s.values();
                 List<String> unknown = new ArrayList<>(s.unknownFacts());
                 String status = s.status();
+                List<String> openMark = List.of();
                 if (SlotResult.OPEN.equals(status)) {
-                    boolean multi = k.catalog().slot(slot).map(Catalog.Slot::multi).orElse(false);
-                    s.openFacts().stream().filter(x -> !unknown.contains(x)).forEach(unknown::add);
+                    // 메인 결정: OPEN → UNKNOWN, 막은 사실을 미확인 칸에(C16 'OPEN에서 옴' 표시). 값이 있었으면 C14 때문에 flags에만
+                    openMark = s.openFacts().stream().filter(x -> !s.unknownFacts().contains(x)).toList();
+                    openMark.forEach(unknown::add);
                     Map<String, Object> o = new LinkedHashMap<>();
                     o.put("flow", f.flowNo());
                     o.put("slot", slot);
                     o.put("blocking", s.openFacts());
-                    if (!values.isEmpty() && multi) {
-                        status = SlotResult.PARTIAL;
-                    } else {
-                        status = SlotResult.UNKNOWN;
-                        if (!values.isEmpty()) {
-                            o.put("values_not_stored", values);   // C14: UNKNOWN은 값 없음
-                        }
-                        values = List.of();
+                    if (!values.isEmpty()) {
+                        o.put("values_not_stored", values);
                     }
+                    status = SlotResult.UNKNOWN;
+                    values = List.of();
                     o.put("stored_as", status);
                     openSlots.add(o);
                     opens.put(slot, s.openFacts());
@@ -146,7 +143,7 @@ public final class JudgmentRecorder {
                 for (String fid : s.basisFacts()) {
                     st.current(f.flowNo(), fid).map(CaseState.Fact::factRowId).ifPresent(basis::add);
                 }
-                slots.add(new SlotEntry(f.flowNo(), slot, status, values, basis, List.copyOf(unknown)));
+                slots.add(new SlotEntry(f.flowNo(), slot, status, values, basis, List.copyOf(unknown), openMark));
             }
             ff.put("slot_flags", slotFlags);
             ff.put("open", opens);

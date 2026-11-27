@@ -215,6 +215,40 @@ class CaseStoreRejectTest {
         }
     }
 
+    // ───────── S9: OPEN에서 온 UNKNOWN 슬롯(메인 결정) ─────────
+
+    /** 흐름 1 processing_mode(예시는 CONFIRMED 일반)를 OPEN에서 온 UNKNOWN으로: 막은 사실 factId, 표시 open. */
+    static List<SlotEntry> openSlot(NewJudgment j, String factId, boolean open) {
+        List<SlotEntry> s = new ArrayList<>();
+        for (SlotEntry x : j.slots()) {
+            s.add(x.flow() == 1 && "processing_mode".equals(x.slot())
+                    ? new SlotEntry(1, x.slot(), "UNKNOWN", List.of(), x.basisFacts(), List.of(factId),
+                    open ? List.of(factId) : List.of())
+                    : x);
+        }
+        return s;
+    }
+
+    @Test
+    void s9_openMarkWithNotFoundFactAccepted() throws Exception {
+        String other = UUID.randomUUID().toString();
+        ex.load(fx.store, other, true);
+        NewJudgment j = ex.judgment(fx.store, other);
+        // F-M2는 예시 사안에 행이 없음(묻지 않은 사실). 표시가 있으면 받는다
+        long id = fx.store.addJudgment(with(j, null, null, openSlot(j, "F-M2", true), null, null));
+        assertThat(fx.jdbc.sql("SELECT status, unknown_facts FROM case_judgment_slots WHERE judgment_id=? AND flow_no=1 "
+                + "AND slot_key='processing_mode'").param(id).query().singleRow()).containsEntry("status", "UNKNOWN");
+        // 표시가 없으면 옛 규칙 그대로 거부
+        assertThatThrownBy(() -> fx.store.addJudgment(with(j, null, null, openSlot(j, "F-M2", false), null, null)))
+                .isInstanceOfSatisfying(Rejected.class, r -> assertThat(r.code()).isEqualTo("C16"));
+    }
+
+    @Test
+    void s9_openMarkWithDecidedFactRejected() {
+        // F-M1은 예시 사안에서 CONFIRMED(합치지 않음): OPEN 표시가 있어도 거부
+        rejects("C16", () -> fx.store.addJudgment(judgment(j -> with(j, null, null, openSlot(j, "F-M1", true), null, null))));
+    }
+
     // ───────── DB 제약 8: CaseStore를 거치지 않은 쓰기도 막힘 ─────────
     @Nested
     class DbWall {
