@@ -181,7 +181,7 @@ public final class JudgmentRecorder {
                 }
                 boolean row = "LEDGER_ROW".equals(x.kind());
                 cites.add(new CitationEntry(idx, x.kind(), x.key(), x.textHash(), row ? x.ledgerVersion() : null,
-                        row ? "LEDGER" : "PACKAGE"));
+                        row ? "LEDGER" : CitationVerifier.ORIGIN_A6.equals(x.origin()) ? "A6" : "PACKAGE"));
             }
         }
         Map<String, Object> flags = new LinkedHashMap<>();

@@ -42,6 +42,8 @@ import tools.jackson.databind.json.JsonMapper;
  */
 public class SpecificAnswerStep {
     public static final String STEP = "A5", PROMPT = "A5_answer", NAME = "답변(쟁점별 의견)";
+    /** A5 출력 tool_requests의 도구 이름(S10, pa/tools GuideTools와 같은 글자). */
+    public static final String TOOL_SEARCH = "search_guides", TOOL_READ = "read_section";
     static final int EXCERPT = 200;
 
     /** 쟁점 하나(코드가 정함). interp = 켜진 해석 쟁점(하위 꾸러미 것은 'PKG14.I29' 꼴). */
@@ -92,18 +94,75 @@ public class SpecificAnswerStep {
     /** extra: 이 단계 업무 검사 뒤에 더 보는 검사(S9 A7 인용 검증, 메인 허락). 거절이면 이유를 붙여 1회 다시, 또 거절이면 LLM_FAILED. */
     public Result run(CaseState st, List<FlowIn> flows, PackageOpener.Opened opened, PackageOpener.RefDate ref,
                       List<Askable> askable, Instant deadline, LlmGateway.Check<AnswerOutput> extra) {
+        Call c = call(st, flows, opened, ref, ToolView.NONE, deadline, extra);
+        return save(st, c, flows, opened, ref, askable, c.r().callIds(), List.of());
+    }
+
+    // ───────── A6 도구와 잇기(S10) ─────────
+
+    /**
+     * 이번 A5 호출에 보이는 A6 도구(S10). enabled = 도구를 줌(입력 tools·출력 tool_requests), remaining = 이 사안에 남은 도구 호출 수,
+     * reduce = 입력 줄이기('해석' 역할 안내서 절은 글 없이 키·경로·제목만), results = 지금까지 도구 결과(입력 tools.results 그대로),
+     * found = 도구가 글을 붙인 절(키 = 절 ID → 원문 단위. 인용해도 되고, 꾸러미 밖이면 출처 A6·'해석 참고').
+     */
+    public record ToolView(boolean enabled, int remaining, boolean reduce, List<Map<String, Object>> results,
+                           Map<String, PackageOpener.Source> found) {
+        public static final ToolView NONE = new ToolView(false, 0, false, List.of(), Map.of());
+    }
+
+    /** 호출 한 번(저장 전). in = 보낸 입력, chars = 입력 JSON 글자 수. */
+    public record Call(Map<String, Object> in, LlmResult<AnswerOutput> r, int chars, ToolView view) {}
+
+    /** A5 호출만(저장하지 않음). 도구 라운드는 흐름(pa/flow)이 돌리고, 끝에 save로 A6 단계들과 함께 한 번에 쓴다. */
+    public Call call(CaseState st, List<FlowIn> flows, PackageOpener.Opened opened, PackageOpener.RefDate ref,
+                     ToolView tv, Instant deadline, LlmGateway.Check<AnswerOutput> extra) {
         KnowledgeSnapshot k = knowledge.snapshot();
-        Map<String, Object> in = input(k, st, flows, opened, ref);
+        Map<String, Object> in = input(k, st, flows, opened, ref, tv);
         Set<String> rows = ledgerRowIds(st);
+        Set<String> keys = allowedKeys(opened, tv);
+        Set<String> omitted = omitted(opened, tv);
         LlmResult<AnswerOutput> r = llm.call(PROMPT, in, AnswerOutput.class,
                 out -> {
-                    String bad = check(k, known(st), flows, opened.keys(), rows, out);
+                    String bad = check(k, known(st), flows, keys, rows, out, tv, omitted);
                     return bad != null || extra == null ? bad : extra.apply(out);
                 },
                 new CallContext(st.caseRow().caseId(), null, deadline, false));
-        int chars = json.writeValueAsString(in).length();
-        return save(st, in, r, flows, opened, ref, askable, chars);
+        return new Call(in, r, json.writeValueAsString(in).length(), tv);
     }
+
+    /** 인용해도 되는 키: 이번 꾸러미 + 도구가 글을 붙인 절. */
+    public static Set<String> allowedKeys(PackageOpener.Opened opened, ToolView tv) {
+        Set<String> out = new LinkedHashSet<>(opened.keys());
+        out.addAll(tv.found().keySet());
+        return out;
+    }
+
+    /** 입력 줄이기로 글을 뺀 꾸러미 절(도구로 읽은 것은 뺌). '해석' 역할로만 쓰인 안내서 절. */
+    public static Set<String> omitted(PackageOpener.Opened opened, ToolView tv) {
+        Set<String> out = new LinkedHashSet<>();
+        if (!tv.reduce()) {
+            return out;
+        }
+        for (PackageOpener.Source s : opened.sources().values()) {
+            if (!PackageOpener.GUIDE_SECTION.equals(s.kind()) || tv.found().containsKey(s.key())) {
+                continue;
+            }
+            boolean onlyInterp = true, any = false;
+            for (PackageOpener.OpenedIssue oi : opened.issues()) {
+                String role = oi.roles().get(s.key());
+                if (role != null) {
+                    any = true;
+                    onlyInterp &= ROLE_INTERP.equals(role);
+                }
+            }
+            if (any && onlyInterp) {
+                out.add(s.key());
+            }
+        }
+        return out;
+    }
+
+    static final String ROLE_INTERP = "해석";
 
     // ───────── 입력 ─────────
 
@@ -121,6 +180,12 @@ public class SpecificAnswerStep {
 
     Map<String, Object> input(KnowledgeSnapshot k, CaseState st, List<FlowIn> flows, PackageOpener.Opened opened,
                               PackageOpener.RefDate ref) {
+        return input(k, st, flows, opened, ref, ToolView.NONE);
+    }
+
+    Map<String, Object> input(KnowledgeSnapshot k, CaseState st, List<FlowIn> flows, PackageOpener.Opened opened,
+                              PackageOpener.RefDate ref, ToolView tv) {
+        Set<String> omitted = omitted(opened, tv);
         // S8b: 사안과 무관한 사실 목록, 그다음 꾸러미 원문을 앞에(같은 꾸러미면 재시도·gap 질문 뒤 다시 보낼 때 앞부분이 같아 공급자 캐시가 맞게), 사실·쟁점은 뒤
         Map<String, Object> in = new LinkedHashMap<>();
         List<Map<String, Object>> ids = new ArrayList<>();
@@ -141,7 +206,11 @@ public class SpecificAnswerStep {
             if (s.hasUpcoming()) {
                 m.put("upcoming", s.upcoming().stream().map(u -> String.valueOf(u.effectiveFrom())).toList());
             }
-            m.put("text", s.text());
+            if (omitted.contains(s.key())) {
+                m.put("text_omitted", true);   // S10 입력 줄이기: 글은 read_section으로
+            } else {
+                m.put("text", s.text());
+            }
             src.add(m);
         }
         in.put("sources", src);
@@ -223,6 +292,13 @@ public class SpecificAnswerStep {
             });
         }
         in.put("ledger_rows", rows);
+        if (tv.enabled()) {
+            // S10: 도구 결과는 맨 뒤(앞부분이 같아 다시 부를 때 공급자 캐시가 맞게)
+            Map<String, Object> t = new LinkedHashMap<>();
+            t.put("remaining", tv.remaining());
+            t.put("results", tv.results());
+            in.put("tools", t);
+        }
         return in;
     }
 
@@ -318,7 +394,35 @@ public class SpecificAnswerStep {
 
     static String check(KnowledgeSnapshot k, Known known, List<FlowIn> flows, Set<String> keys, Set<String> rows,
                         AnswerOutput out) {
+        return check(k, known, flows, keys, rows, out, ToolView.NONE, Set.of());
+    }
+
+    /** S10: 글을 뺀 절(omitted)을 읽지 않고 인용하면 거절, 도구 요청 꼴(search_guides는 검색어, read_section은 있는 절 ID). */
+    static String check(KnowledgeSnapshot k, Known known, List<FlowIn> flows, Set<String> keys, Set<String> rows,
+                        AnswerOutput out, ToolView tv, Set<String> omitted) {
         List<String> bad = new ArrayList<>();
+        for (AnswerOutput.IssueOut o : out.issues()) {
+            for (String c : o.cites()) {
+                if (omitted.contains(c)) {
+                    bad.add(o.flow() + "|" + o.issue() + ": 글을 받지 않은 절 '" + c + "' 인용(read_section으로 읽거나 인용에서 뺌)");
+                }
+            }
+        }
+        if (tv.enabled()) {
+            for (AnswerOutput.ToolRequest q : out.toolRequests()) {
+                if (TOOL_SEARCH.equals(q.tool())) {
+                    if (q.query() == null || q.query().isBlank()) {
+                        bad.add("search_guides에 검색어 없음");
+                    }
+                } else if (TOOL_READ.equals(q.tool())) {
+                    if (q.sectionId() == null || !k.sections().has(q.sectionId())) {
+                        bad.add("read_section 절 '" + q.sectionId() + "' 없음");
+                    }
+                } else {
+                    bad.add("모르는 도구 '" + q.tool() + "'");
+                }
+            }
+        }
         Map<String, Integer> seen = new LinkedHashMap<>();
         Set<String> want = new LinkedHashSet<>();
         for (FlowIn f : flows) {
@@ -384,6 +488,12 @@ public class SpecificAnswerStep {
     /** 모델 출력 → 답(코드가 확정 여부·이관 사유·원문 요약을 정함). */
     static Answer answer(KnowledgeSnapshot k, CaseState st, List<FlowIn> flows, PackageOpener.Opened opened,
                          PackageOpener.RefDate ref, AnswerOutput out, List<Askable> askable, Askable[] asked) {
+        return answer(k, st, flows, opened, ref, out, askable, asked, ToolView.NONE);
+    }
+
+    static Answer answer(KnowledgeSnapshot k, CaseState st, List<FlowIn> flows, PackageOpener.Opened opened,
+                         PackageOpener.RefDate ref, AnswerOutput out, List<Askable> askable, Askable[] asked,
+                         ToolView tv) {
         List<Answer.Gap> gaps = new ArrayList<>();
         List<Answer.AddedReason> reasons = baseReasons(ref);
         for (AnswerOutput.GapOut g : out.gaps()) {
@@ -450,7 +560,14 @@ public class SpecificAnswerStep {
         List<Answer.Source> sources = new ArrayList<>();
         for (String c : citeOrder) {
             PackageOpener.Source s = opened.sources().get(c);
-            sources.add(source(s, roleOf.get(c), EXCERPT));
+            if (s != null) {
+                sources.add(source(s, roleOf.get(c), EXCERPT));
+            } else {
+                // S10: A6이 글을 붙인 꾸러미 밖 안내서 절 → 출처 A6, 즉답 근거 아님('해석 참고')
+                Answer.Source x = source(tv.found().get(c), ROLE_INTERP, EXCERPT);
+                sources.add(new Answer.Source(x.key(), x.kind(), x.doc(), x.label(), x.title(), x.role(), x.textHash(),
+                        x.effectiveFrom(), x.upcoming(), false, x.usePolicy(), x.excerpt(), Answer.Source.A6));
+            }
         }
         List<Answer.LedgerRow> rows = new ArrayList<>();
         for (String id : rowOrder) {
@@ -507,19 +624,34 @@ public class SpecificAnswerStep {
         return s == null || s.isBlank() ? null : s;
     }
 
-    Result save(CaseState st, Map<String, Object> in, LlmResult<AnswerOutput> r, List<FlowIn> flows,
-                PackageOpener.Opened opened, PackageOpener.RefDate ref, List<Askable> askable, int chars) {
+    /**
+     * 마지막 호출 c를 A5 단계로 쓴다. toolSteps(S10 A6 단계, actor TOOL)는 같은 트랜잭션에서 A5 단계 앞에 쓴다(도구 라운드 중간에 실패하면
+     * 아무것도 남지 않아 재시도가 처음부터 다시 돈다: 같은 입력 뒤 같은 단계 저장 거절과 부딪치지 않게). callIds = 모든 라운드의 호출.
+     * steps = [A5 단계, A6 단계…].
+     */
+    public Result save(CaseState st, Call c, List<FlowIn> flows, PackageOpener.Opened opened, PackageOpener.RefDate ref,
+                       List<Askable> askable, List<Long> callIds, List<NewStep> toolSteps) {
+        LlmResult<AnswerOutput> r = c.r();
+        Map<String, Object> in = c.in();
         String caseId = st.caseRow().caseId();
         LocalDateTime at = clock.nowUtc();
         KnowledgeSnapshot k = knowledge.snapshot();
         Askable[] asked = new Askable[1];
-        Answer a = r.ok() ? answer(k, st, flows, opened, ref, r.value(), askable, asked) : null;
+        Answer a = r.ok() ? answer(k, st, flows, opened, ref, r.value(), askable, asked, c.view()) : null;
         return lock.write(caseId, st.inputMark(), STEP, NAME, null, () -> {
+            List<Integer> tools = new ArrayList<>();
+            for (NewStep t : toolSteps) {
+                tools.add(store.addStep(t));
+            }
             Object out = a != null ? a : Map.of("error", String.valueOf(r.lastError()));
             int seq = store.addStep(NewStep.llm(caseId, STEP, NAME, in, out, at, null, r.promptId(), r.promptVersion(),
                     r.model(), r.temperature(), code.value(), r.status().name(), r.attempts()));
-            linkCalls(jdbc, caseId, seq, r.callIds());
-            return new Result(r.status(), a, List.of(seq), r.callIds(), r.ok() ? null : r.lastError(), chars, asked[0]);
+            linkCalls(jdbc, caseId, seq, callIds);
+            List<Integer> steps = new ArrayList<>();
+            steps.add(seq);
+            steps.addAll(tools);
+            return new Result(r.status(), a, List.copyOf(steps), List.copyOf(callIds), r.ok() ? null : r.lastError(),
+                    c.chars(), asked[0]);
         });
     }
 

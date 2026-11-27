@@ -23,7 +23,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 import io.github.overdozya.privacyask.answer.Answer;
 import io.github.overdozya.privacyask.answer.GeneralAnswerStep;
+import io.github.overdozya.privacyask.answer.AnswerOutput;
 import io.github.overdozya.privacyask.answer.SpecificAnswerStep;
+import io.github.overdozya.privacyask.tools.GuideTools;
 import io.github.overdozya.privacyask.baseline.BaselineStep;
 import io.github.overdozya.privacyask.common.AppClock;
 import io.github.overdozya.privacyask.common.CodeVersion;
@@ -99,9 +101,14 @@ public class TurnService {
 
     /** S8: A4 꾸러미 열기·A5 답변(구체·일반). gapQuestions = 사안당 A5 사실 부족 gap으로 더 묻는 질문 수 상한. */
     public record AnswerStages(PackageService packages, SpecificAnswerStep specific, GeneralAnswerStep general,
-                               int gapQuestions) {
+                               int gapQuestions, GuideTools tools) {
         public AnswerStages(PackageService packages, SpecificAnswerStep specific, GeneralAnswerStep general) {
-            this(packages, specific, general, 1);
+            this(packages, specific, general, 1, null);
+        }
+
+        public AnswerStages(PackageService packages, SpecificAnswerStep specific, GeneralAnswerStep general,
+                            int gapQuestions) {
+            this(packages, specific, general, gapQuestions, null);
         }
     }
 
@@ -893,12 +900,7 @@ public class TurnService {
             writeA4(ctx, st, op, NextAction.A4_REOPEN_NAME, extra);
             recorded = a4Record(ctx.caseId);
         }
-        CitationVerifier verifier = new CitationVerifier(knowledge.snapshot());
-        CitationVerifier.Basis vb = new CitationVerifier.Basis(op.opened().keys(), CitationVerifier.sources(op.opened()),
-                recorded, ledgerRows(st), st.caseRow().ledgerVersion(), op.opened().date(), true);
-        SpecificAnswerStep.Result r = llmStage(ctx, () -> stages.specific().run(st, flows, op.opened(), op.ref(), ask0,
-                ctx.deadline, out -> verifier.verify(vb, CitationVerifier.issues(out)).reason()),
-                SpecificAnswerStep.Result::callIds);
+        SpecificAnswerStep.Result r = a5WithTools(ctx, st, op, flows, ask0, recorded);
         ctx.steps.addAll(r.steps());
         if (r.failed()) {
             throw llmFailed(ctx, a, r.error());
@@ -930,6 +932,167 @@ public class TurnService {
         return new TurnResult(caseId, c.state(), TurnResult.QUESTION, new TurnResult.Intake(c.intakeType(),
                 c.outOfScopeKind()), new TurnResult.Question(w[1], ask.flowNo(), ask.factId(), ask.askNo(), qt.text(),
                 qt.choices()), null, null, null);
+    }
+
+    // ───────── A6 보조 검색 (S10) ─────────
+
+    /** A6 단계 이름(actor TOOL). 사안당 도구 호출 수는 이 두 이름의 OK 단계 수. */
+    public static final String A6_SEARCH_NAME = "보조 검색(안내서)", A6_READ_NAME = "절 읽기", A6_STOP_NAME = "도구 멈춤";
+    /** 도구 라운드를 하나 더 돌릴 턴 남은 시간 하한(A5 low 한 번 8~11초 + A7 요지 2~3초 + 여유). */
+    static final java.time.Duration A6_MIN_LEFT = java.time.Duration.ofSeconds(25);
+
+    static int a6Used(CaseState st) {
+        return (int) st.steps().stream().filter(s -> "A6".equals(s.step()) && s.ok()
+                && (A6_SEARCH_NAME.equals(s.name()) || A6_READ_NAME.equals(s.name()))).count();
+    }
+
+    /**
+     * A5 구체 + A6 라운드(03 4.2 A6): 모델이 tool_requests를 내면(부를지·검색어 = LLM) 코드가 사안당 상한 안에서 돌리고(실행 = 코드),
+     * 찾은 절의 글을 입력 tools.results에 붙여 A5를 다시 부른다. 마지막 호출의 답이 답이다(풀린 gap은 거기서 빠져 이관 사유도 빠진다).
+     * 도구가 꺼졌거나 상한·턴 시간이 다 됐으면 지금 답 그대로. A6 단계와 A5 단계는 끝에 한 트랜잭션으로 쓴다.
+     */
+    private SpecificAnswerStep.Result a5WithTools(Ctx ctx, CaseState st, Opening op, List<SpecificAnswerStep.FlowIn> flows,
+                                                  List<SpecificAnswerStep.Askable> ask0, Map<String, String> recorded) {
+        GuideTools tools = stages.tools();
+        boolean on = tools != null && tools.enabled();
+        int max = on ? tools.props().maxCallsPerCase() : 0;
+        boolean reduce = on && tools.props().reduceInput();
+        int used = on ? a6Used(st) : 0;
+        CitationVerifier verifier = new CitationVerifier(knowledge.snapshot());
+        List<Map<String, Object>> results = new ArrayList<>();
+        Map<String, PackageOpener.Source> found = new LinkedHashMap<>();
+        List<NewStep> toolSteps = new ArrayList<>();
+        List<Long> callIds = new ArrayList<>();
+        SpecificAnswerStep.Call c;
+        int round = 0;
+        while (true) {
+            round++;
+            SpecificAnswerStep.ToolView tv = new SpecificAnswerStep.ToolView(on, Math.max(0, max - used), reduce,
+                    List.copyOf(results), Map.copyOf(found));
+            CitationVerifier.Basis vb = new CitationVerifier.Basis(SpecificAnswerStep.allowedKeys(op.opened(), tv),
+                    CitationVerifier.withA6(CitationVerifier.sources(op.opened()), found), recorded, ledgerRows(st),
+                    st.caseRow().ledgerVersion(), op.opened().date(), true);
+            c = llmStage(ctx, () -> stages.specific().call(st, flows, op.opened(), op.ref(), tv, ctx.deadline,
+                    out -> verifier.verify(vb, CitationVerifier.issues(out)).reason()), x -> x.r().callIds());
+            callIds.addAll(c.r().callIds());
+            if (!c.r().ok() || !on) {
+                break;
+            }
+            List<AnswerOutput.ToolRequest> reqs = c.r().value().toolRequests();
+            if (reqs.isEmpty()) {
+                break;
+            }
+            String stop = used >= max ? "사안당 도구 상한 " + max + "회를 다 씀"
+                    : java.time.Duration.between(java.time.Instant.now(), ctx.deadline).compareTo(A6_MIN_LEFT) < 0
+                    ? "턴 남은 시간이 " + A6_MIN_LEFT.toSeconds() + "초 미만" : null;
+            if (stop != null) {
+                Map<String, Object> in = new LinkedHashMap<>();
+                in.put("round", round);
+                in.put("requests", reqs);
+                toolSteps.add(toolStep(ctx.caseId, A6_STOP_NAME, in, Map.of("stopped", stop)));
+                break;
+            }
+            for (AnswerOutput.ToolRequest q : reqs) {
+                if (used >= max) {
+                    break;
+                }
+                used++;
+                toolSteps.add(runTool(ctx.caseId, tools, op, q, round, used, max, results, found, c.r().callIds()));
+            }
+        }
+        final SpecificAnswerStep.Call last = c;
+        return stages.specific().save(st, last, flows, op.opened(), op.ref(), ask0, callIds, toolSteps);
+    }
+
+    /** 도구 하나를 돌려 결과·찾은 절에 더하고 A6 단계(쓰기 전)를 돌려준다. 단계에는 키·해시·점수·ms만(글은 스냅샷에서 다시 나온다). */
+    private NewStep runTool(String caseId, GuideTools tools, Opening op, AnswerOutput.ToolRequest q, int round, int n,
+                            int max, List<Map<String, Object>> results, Map<String, PackageOpener.Source> found,
+                            List<Long> fromCalls) {
+        Map<String, Object> in = new LinkedHashMap<>();
+        in.put("round", round);
+        in.put("call_no", n);
+        in.put("max", max);
+        in.put("tool", q.tool());
+        in.put("query", q.query());
+        in.put("flow", q.flow());
+        in.put("issue", q.issue());
+        in.put("section_id", q.sectionId());
+        in.put("why", q.why());
+        in.put("from_calls", fromCalls);
+        Map<String, Object> out = new LinkedHashMap<>();
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("tool", q.tool());
+        List<Map<String, Object>> secs = new ArrayList<>();
+        List<Map<String, Object>> logged = new ArrayList<>();
+        String name;
+        if (SpecificAnswerStep.TOOL_SEARCH.equals(q.tool())) {
+            name = A6_SEARCH_NAME;
+            Set<String> given = new LinkedHashSet<>(found.keySet());
+            op.opened().sources().values().stream().filter(s -> PackageOpener.GUIDE_SECTION.equals(s.kind()))
+                    .forEach(s -> given.add(s.key()));   // 꾸러미 절(글을 줬든 줄였든)은 키로 이미 보인다
+            GuideTools.SearchResult r = tools.search(q.query(), q.issue(), tools.props().searchSections(), given);
+            res.put("query", q.query());
+            res.put("issue", q.issue());
+            out.put("mode", r.mode());
+            out.put("note", r.note());
+            out.put("embed_ms", r.embedMs());
+            out.put("search_ms", r.searchMs());
+            for (GuideTools.Hit h : r.hits()) {
+                GuideTools.Section s = tools.read(h.sectionId()).orElseThrow();
+                secs.add(sectionMap(s, h.score()));
+                found.put(s.sectionId(), a6Source(s));
+                Map<String, Object> l = new LinkedHashMap<>();
+                l.put("section_id", h.sectionId());
+                l.put("score", h.score());
+                l.put("vector_rank", h.vectorRank());
+                l.put("text_rank", h.textRank());
+                l.put("chunk_id", h.chunkId());
+                l.put("hash", s.textHash());
+                l.put("chars", s.chars());
+                l.put("truncated", s.truncated());
+                logged.add(l);
+            }
+        } else {
+            name = A6_READ_NAME;
+            res.put("section_id", q.sectionId());
+            tools.read(q.sectionId()).ifPresent(s -> {
+                secs.add(sectionMap(s, null));
+                found.put(s.sectionId(), a6Source(s));
+                logged.add(Map.of("section_id", s.sectionId(), "hash", s.textHash(), "chars", s.chars(),
+                        "truncated", s.truncated()));
+            });
+        }
+        res.put("sections", secs);
+        results.add(res);
+        out.put("sections", logged);
+        return toolStep(caseId, name, in, out);
+    }
+
+    static Map<String, Object> sectionMap(GuideTools.Section s, Double score) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("key", s.sectionId());
+        m.put("doc", s.doc());
+        m.put("path", s.path());
+        m.put("title", s.title());
+        if (score != null) {
+            m.put("score", score);
+        }
+        if (s.truncated()) {
+            m.put("truncated", true);
+        }
+        m.put("text", s.text());
+        return m;
+    }
+
+    /** A6 절 → 원문 단위(즉답 근거 아님: 출처가 A6이면 A7이 '해석 참고'로만 센다). */
+    static PackageOpener.Source a6Source(GuideTools.Section s) {
+        return new PackageOpener.Source(s.sectionId(), PackageOpener.GUIDE_SECTION, s.docId(), s.doc(), s.path(), s.title(),
+                s.text(), s.textHash(), null, null, List.of(), s.usePolicy(), false);
+    }
+
+    private NewStep toolStep(String caseId, String name, Object in, Object out) {
+        return new NewStep(caseId, "A6", "TOOL", name, in, out, clock.nowUtc(), null, null, null, null, null,
+                code.value(), "OK", 1);
     }
 
     // ───────── A7 검증·출구 · A8 판정 기록 (S9) ─────────
@@ -972,7 +1135,12 @@ public class TurnService {
             return new CitationVerifier.Basis(allowed, CitationVerifier.sources(a), null, Set.of(), ledger, date, true);
         }
         Map<String, String> recorded = a4Record(ctx.caseId);
-        return new CitationVerifier.Basis(op.opened().keys(), CitationVerifier.sources(a), recorded, ledgerRows(st),
+        // S10: A5 답에 출처 A6으로 붙은 절도 인용해도 되는 키(해시는 스냅샷 절 해시와 다시 견준다)
+        Set<String> allowed = new LinkedHashSet<>(op.opened().keys());
+        if (a.sources() != null) {
+            a.sources().stream().filter(Answer.Source::fromA6).forEach(x -> allowed.add(x.key()));
+        }
+        return new CitationVerifier.Basis(allowed, CitationVerifier.sources(a), recorded, ledgerRows(st),
                 ledger, date, true);
     }
 

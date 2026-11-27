@@ -38,7 +38,19 @@ public record Answer(String kind, String referenceDate, String referenceDateBasi
      */
     public record Source(String key, String kind, String doc, String label, String title, String role,
                          String textHash, String effectiveFrom, List<String> upcoming, boolean answerBasis,
-                         String usePolicy, String excerpt) {}
+                         String usePolicy, String excerpt, String origin) {
+        /** origin: 꾸러미(null·PACKAGE) 또는 A6 보조 검색으로 받은 안내서 절(A6, S10: 즉답 근거로 세지 않는 '해석 참고'). */
+        public static final String A6 = "A6";
+
+        public Source(String key, String kind, String doc, String label, String title, String role, String textHash,
+                      String effectiveFrom, List<String> upcoming, boolean answerBasis, String usePolicy, String excerpt) {
+            this(key, kind, doc, label, title, role, textHash, effectiveFrom, upcoming, answerBasis, usePolicy, excerpt, null);
+        }
+
+        public boolean fromA6() {
+            return A6.equals(origin);
+        }
+    }
 
     public record LedgerRow(String rowId, String attachment, String textHash, String excerpt) {}
 

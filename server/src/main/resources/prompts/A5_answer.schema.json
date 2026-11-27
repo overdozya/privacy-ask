@@ -35,6 +35,23 @@
         "required": ["kind", "flow", "issue", "facts", "note"],
         "additionalProperties": false
       }
+    },
+    "tool_requests": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "properties": {
+          "tool": { "type": "string", "enum": ["search_guides", "read_section"] },
+          "query": { "type": ["string", "null"], "maxLength": 200 },
+          "flow": { "type": ["integer", "null"], "minimum": 1, "maximum": 20 },
+          "issue": { "type": ["string", "null"], "maxLength": 60 },
+          "section_id": { "type": ["string", "null"], "maxLength": 40 },
+          "why": { "type": "string", "minLength": 1, "maxLength": 300 }
+        },
+        "required": ["tool", "query", "flow", "issue", "section_id", "why"],
+        "additionalProperties": false
+      }
     }
   },
   "required": ["issues", "gaps"],

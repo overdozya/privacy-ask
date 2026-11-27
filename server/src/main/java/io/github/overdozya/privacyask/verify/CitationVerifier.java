@@ -38,8 +38,15 @@ public final class CitationVerifier {
     /** 쟁점 하나(일반 답은 flow·issue가 null인 하나)의 인용. */
     public record IssueCites(Integer flow, String issue, List<String> cites, List<String> ledgerRows) {}
 
-    /** 인용된 원문 단위(코드가 붙인 것). kind LAW_UNIT·ANNEX·GUIDE_SECTION. */
-    public record Cited(String key, String kind, String textHash, boolean answerBasis, String usePolicy) {}
+    /** 출처(S10): 꾸러미(A4) 또는 A6 보조 검색. 판정 인용 행 origin(PACKAGE·A6·LEDGER)에 그대로 간다. */
+    public static final String ORIGIN_PACKAGE = "PACKAGE", ORIGIN_A6 = "A6";
+
+    /** 인용된 원문 단위(코드가 붙인 것). kind LAW_UNIT·ANNEX·GUIDE_SECTION. origin PACKAGE·A6(A6 절은 즉답 근거로 세지 않음). */
+    public record Cited(String key, String kind, String textHash, boolean answerBasis, String usePolicy, String origin) {
+        public Cited(String key, String kind, String textHash, boolean answerBasis, String usePolicy) {
+            this(key, kind, textHash, answerBasis, usePolicy, ORIGIN_PACKAGE);
+        }
+    }
 
     public record Problem(String kind, Integer flow, String issue, String key, String detail) {
         String line() {
@@ -50,7 +57,12 @@ public final class CitationVerifier {
 
     /** 확인한 인용 하나(판정 인용 행·검토 묶음에 씀). use = 즉답 근거·해석 참고·처리방침 행. */
     public record Checked(Integer flow, String issue, String key, String kind, String textHash, String ledgerVersion,
-                          String use, boolean ok) {}
+                          String use, boolean ok, String origin) {
+        public Checked(Integer flow, String issue, String key, String kind, String textHash, String ledgerVersion,
+                       String use, boolean ok) {
+            this(flow, issue, key, kind, textHash, ledgerVersion, use, ok, "LEDGER_ROW".equals(kind) ? null : ORIGIN_PACKAGE);
+        }
+    }
 
     public record Report(LocalDate date, List<Checked> cites, List<Problem> problems) {
         public boolean ok() {
@@ -158,9 +170,9 @@ public final class CitationVerifier {
             bad.add(new Problem(HASH_MISMATCH, i.flow(), i.issue(), c.key(),
                     "A4 기록 해시 " + head(b.recorded().get(c.key())) + " ≠ 인용 해시 " + head(c.textHash())));
         }
-        boolean basis = c.answerBasis() && "ANSWER_BASIS".equals(c.usePolicy());
+        boolean basis = c.answerBasis() && "ANSWER_BASIS".equals(c.usePolicy()) && !ORIGIN_A6.equals(c.origin());
         out.add(new Checked(i.flow(), i.issue(), c.key(), c.kind(), c.textHash(), null,
-                basis ? USE_BASIS : USE_REFERENCE, why == null));
+                basis ? USE_BASIS : USE_REFERENCE, why == null, c.origin() == null ? ORIGIN_PACKAGE : c.origin()));
         return basis && why == null;
     }
 
@@ -211,6 +223,13 @@ public final class CitationVerifier {
 
     // ───────── 재료 짓기 ─────────
 
+    /** S10: A6이 글을 붙인 절(꾸러미에 없는 것만) → 인용 대상(출처 A6, 즉답 근거 아님). */
+    public static Map<String, Cited> withA6(Map<String, Cited> base, Map<String, PackageOpener.Source> found) {
+        Map<String, Cited> m = new LinkedHashMap<>(base);
+        found.forEach((key, s) -> m.putIfAbsent(key, new Cited(key, s.kind(), s.textHash(), false, s.usePolicy(), ORIGIN_A6)));
+        return m;
+    }
+
     /** 꾸러미 원문 단위 → 인용 대상. */
     public static Map<String, Cited> sources(PackageOpener.Opened o) {
         Map<String, Cited> m = new LinkedHashMap<>();
@@ -223,7 +242,8 @@ public final class CitationVerifier {
         Map<String, Cited> m = new LinkedHashMap<>();
         if (a.sources() != null) {
             for (Answer.Source s : a.sources()) {
-                m.put(s.key(), new Cited(s.key(), s.kind(), s.textHash(), s.answerBasis(), s.usePolicy()));
+                m.put(s.key(), new Cited(s.key(), s.kind(), s.textHash(), s.answerBasis(), s.usePolicy(),
+                        s.fromA6() ? ORIGIN_A6 : ORIGIN_PACKAGE));
             }
         }
         return m;
