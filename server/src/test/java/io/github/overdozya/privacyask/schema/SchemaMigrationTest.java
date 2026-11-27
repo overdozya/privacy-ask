@@ -136,6 +136,13 @@ class SchemaMigrationTest {
                 .param("t", T).update()).isInstanceOf(DataAccessException.class).hasMessageContaining("ck_llm_call_logs_version");
         assertThatThrownBy(() -> jdbc.sql("INSERT INTO kb_links (link_id, link_type, src_key, dst_key, resolution, origin) VALUES (1, '아무거나', 'a', 'b', '정확', '본문')")
                 .update()).isInstanceOf(DataAccessException.class).hasMessageContaining("ck_kb_links_type");
+        // 슬롯 변환 SKIP은 값이 없어야 한다(S3 slot_rules의 세 번째 효과)
+        jdbc.sql("INSERT INTO slot_catalog VALUES ('night_transmission', '야간 전송', 'SINGLE', NULL, 'v1.0', 80)").update();
+        jdbc.sql("INSERT INTO slot_rules VALUES ('v1', 'night_transmission', 1, '{\"fact\":\"F-T1\",\"op\":\"eq\",\"value\":\"x\"}', 'SKIP', '[]', NULL, '[]', NULL)").update();
+        assertThatThrownBy(() -> jdbc.sql("INSERT INTO slot_rules VALUES ('v1', 'night_transmission', 2, '{}', 'SKIP', '[\"아니오\"]', NULL, '[]', NULL)")
+                .update()).isInstanceOf(DataAccessException.class).hasMessageContaining("ck_slot_rules_skip");
+        assertThatThrownBy(() -> jdbc.sql("INSERT INTO slot_rules VALUES ('v1', 'night_transmission', 3, '{}', 'DROP', '[]', NULL, '[]', NULL)")
+                .update()).isInstanceOf(DataAccessException.class).hasMessageContaining("ck_slot_rules_effect");
     }
 
     @Test

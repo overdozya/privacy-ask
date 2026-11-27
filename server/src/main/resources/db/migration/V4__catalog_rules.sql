@@ -88,13 +88,14 @@ CREATE TABLE slot_rules (
   slot_key    VARCHAR(40) COLLATE utf8mb4_bin NOT NULL,
   ord         INT         NOT NULL,
   when_json   JSON        NOT NULL,
-  effect      VARCHAR(3)  NOT NULL,
+  effect      VARCHAR(4)  NOT NULL COMMENT 'SET(단일) · ADD(복수) · SKIP(묻지 않음 → 슬롯 SKIPPED, 값 없음)',
   values_json JSON        NOT NULL,
   flag        VARCHAR(20),
   basis_keys  JSON        NOT NULL,
   note        TEXT,
   PRIMARY KEY (version, slot_key, ord),
-  CONSTRAINT ck_slot_rules_effect CHECK (effect IN ('SET','ADD')),
+  CONSTRAINT ck_slot_rules_effect CHECK (effect IN ('SET','ADD','SKIP')),
+  CONSTRAINT ck_slot_rules_skip CHECK (effect <> 'SKIP' OR JSON_LENGTH(values_json) = 0),
   CONSTRAINT ck_slot_rules_flag CHECK (flag IS NULL OR flag IN ('FACT_CONFLICT','CHECK_ITEM')),
   CONSTRAINT fk_slot_rules_slot FOREIGN KEY (slot_key) REFERENCES slot_catalog (slot_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='슬롯 변환 규칙(04 1.1~1.10, 사실 조합 → 슬롯 값)';
