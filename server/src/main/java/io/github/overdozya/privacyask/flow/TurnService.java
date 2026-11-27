@@ -777,6 +777,11 @@ public class TurnService {
     private void a4(Ctx ctx, CaseState st) {
         Opening op = opening(st);
         ctx.opening = op;
+        writeA4(ctx, st, op, NextAction.A4_NAME, null);
+    }
+
+    /** A4 단계 쓰기(extra = 다시 열 때 더하는 칸: 까닭·횟수). */
+    private void writeA4(Ctx ctx, CaseState st, Opening op, String name, Map<String, Object> extra) {
         PackageOpener.RefDate ref = op.ref();
         PackageOpener.Opened o = op.opened();
         Map<String, Object> in = new LinkedHashMap<>();
@@ -816,11 +821,43 @@ public class TurnService {
         out.put("units", o.sources().size());
         out.put("chars", o.chars());
         out.put("micros", o.micros());
+        if (extra != null) {
+            out.putAll(extra);
+        }
         LocalDateTime at = clock.nowUtc();
         String caseId = ctx.caseId;
-        int seq = lock.write(caseId, st.inputMark(), "A4", NextAction.A4_NAME, null, () -> store.addStep(
-                NewStep.code(caseId, "A4", NextAction.A4_NAME, in, out, at, null, code.value())));
+        int seq = lock.write(caseId, st.inputMark(), "A4", name, null, () -> store.addStep(
+                NewStep.code(caseId, "A4", name, in, out, at, null, code.value())));
         ctx.steps.add(seq);
+    }
+
+    /** 마지막 A4 기록(꾸러미 열기 또는 다시 열기)의 키 → 해시. */
+    Map<String, String> a4Record(String caseId) {
+        Map<String, String> recorded = new LinkedHashMap<>();
+        jdbc.sql("""
+                SELECT output_json FROM steps WHERE case_id=? AND step='A4' AND name IN (?, ?) AND status='OK'
+                ORDER BY seq DESC LIMIT 1""").params(caseId, NextAction.A4_NAME, NextAction.A4_REOPEN_NAME)
+                .query(String.class).optional().map(json::readTree).ifPresent(a4 -> {
+                    if (a4.has("sources")) {
+                        a4.get("sources").properties().forEach(e -> recorded.put(e.getKey(), e.getValue().asString()));
+                    }
+                });
+        return recorded;
+    }
+
+    /** A7 데이터 검사: 지금 연 꾸러미의 키·해시가 A4 기록과 같은가. 다르면 그 키들(앞 5개). */
+    static List<String> dataMismatch(Opening op, Map<String, String> recorded) {
+        List<String> out = new ArrayList<>();
+        Set<String> keys = new LinkedHashSet<>(recorded.keySet());
+        keys.addAll(op.opened().sources().keySet());
+        for (String k : keys) {
+            PackageOpener.Source s = op.opened().sources().get(k);
+            String h = recorded.get(k);
+            if (s == null || h == null || !h.equals(s.textHash())) {
+                out.add(k);
+            }
+        }
+        return out;
     }
 
     static int gapQuestionsAsked(CaseState st) {
@@ -843,8 +880,25 @@ public class TurnService {
             askable = sel.worth().stream().map(x -> new SpecificAnswerStep.Askable(x.flowNo(), x.factId())).toList();
         }
         final List<SpecificAnswerStep.Askable> ask0 = askable;
+        // S9 A7 데이터 검사(메인 결정): 지금 연 꾸러미가 A4 기록과 다르면(그 사이 스냅샷이 바뀜) 입력 한 번에 1회 다시 열어 기록하고 A5로
+        Map<String, String> recorded = a4Record(ctx.caseId);
+        List<String> mismatch = dataMismatch(op, recorded);
+        if (!mismatch.isEmpty()) {
+            if (st.doneSinceInput("A4", NextAction.A4_REOPEN_NAME, null)) {
+                throw llmFailed(ctx, a, "A7 데이터 검사: 다시 연 꾸러미도 기록과 다름 " + mismatch);
+            }
+            Map<String, Object> extra = new LinkedHashMap<>();
+            extra.put("reopen_count", 1);
+            extra.put("reopen_reason", "A4 기록 해시 ≠ 지금 스냅샷: " + mismatch.subList(0, Math.min(5, mismatch.size())));
+            writeA4(ctx, st, op, NextAction.A4_REOPEN_NAME, extra);
+            recorded = a4Record(ctx.caseId);
+        }
+        CitationVerifier verifier = new CitationVerifier(knowledge.snapshot());
+        CitationVerifier.Basis vb = new CitationVerifier.Basis(op.opened().keys(), CitationVerifier.sources(op.opened()),
+                recorded, ledgerRows(st), st.caseRow().ledgerVersion(), op.opened().date(), true);
         SpecificAnswerStep.Result r = llmStage(ctx, () -> stages.specific().run(st, flows, op.opened(), op.ref(), ask0,
-                ctx.deadline), SpecificAnswerStep.Result::callIds);
+                ctx.deadline, out -> verifier.verify(vb, CitationVerifier.issues(out)).reason()),
+                SpecificAnswerStep.Result::callIds);
         ctx.steps.addAll(r.steps());
         if (r.failed()) {
             throw llmFailed(ctx, a, r.error());
@@ -917,11 +971,7 @@ public class TurnService {
             a.sources().forEach(x -> allowed.add(x.key()));
             return new CitationVerifier.Basis(allowed, CitationVerifier.sources(a), null, Set.of(), ledger, date, true);
         }
-        Map<String, String> recorded = new LinkedHashMap<>();
-        JsonNode a4 = lastOutput(ctx.caseId, "A4", NextAction.A4_NAME);
-        if (a4 != null && a4.has("sources")) {
-            a4.get("sources").properties().forEach(e -> recorded.put(e.getKey(), e.getValue().asString()));
-        }
+        Map<String, String> recorded = a4Record(ctx.caseId);
         return new CitationVerifier.Basis(op.opened().keys(), CitationVerifier.sources(a), recorded, ledgerRows(st),
                 ledger, date, true);
     }
@@ -971,6 +1021,9 @@ public class TurnService {
         in.put("answer_from_step", general ? lastSeq(ctx.caseId, GeneralAnswerStep.STEP, GeneralAnswerStep.NAME_TEXT)
                 : lastSeq(ctx.caseId, SpecificAnswerStep.STEP, SpecificAnswerStep.NAME));
         in.put("a4_from_step", general ? null : lastSeq(ctx.caseId, "A4", NextAction.A4_NAME));
+        Integer reopen = general ? null : lastSeq(ctx.caseId, "A4", NextAction.A4_REOPEN_NAME);
+        in.put("a4_reopened_step", reopen);
+        in.put("a4_reopen_count", st.doneSinceInput("A4", NextAction.A4_REOPEN_NAME, null) ? 1 : 0);
         in.put("open_date", v.answer().openDate());
         putLaw(in, ctx);
         in.put("rule", "사유가 하나라도 있으면 TRANSFER, 없으면 exit_policy[사안 등급](03 4.2 A7 4)");

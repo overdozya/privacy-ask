@@ -1024,4 +1024,114 @@ class FlowApiTest {
         assertThat(rv.status()).isEqualTo(409);
         assertThat(rv.body().get("code").asString()).isEqualTo("NO_REVIEW");
     }
+
+    // ───────── S9 ② A7 인용 검사 → A5 재시도 → LLM_FAILED → API 3 ─────────
+
+    static final String REF_GUIDE = "G50-2a033acc75";   // 꾸러미 v2 PKG05(국외 이전)의 '해석' 절, 즉답 근거 아님
+
+    /** 예시 사안인데 흐름 1 서버가 해외(예(나라) 미국) → 국외 이전 쟁점(PKG05)이 선다. 나머지 질문은 예시 답 또는 '아니오' 쪽. */
+    static Res runAbroad() throws Exception {
+        Res r = create();
+        String id = r.body().get("case_id").asString();
+        for (int i = 0; i < 10 && r.status() == 200 && "QUESTION".equals(r.body().get("outcome").asString()); i++) {
+            JsonNode q = r.body().get("question");
+            Map<String, Object> body;
+            if ("1:F-C2".equals(key(q))) {
+                body = answer(q.get("turn_no").asInt(), "예(나라)");
+                body.put("detail", "미국");
+            } else {
+                String pick = EXAMPLE_ANSWERS.get(key(q));
+                if (pick == null) {
+                    List<String> ch = Condition.strings(q.get("choices"));
+                    pick = ch.stream().filter(c -> c.startsWith("아니오")).findFirst()
+                            .orElse(ch.stream().filter(c -> !c.equals("잘 모르겠음")).findFirst().orElseThrow());
+                }
+                body = answer(q.get("turn_no").asInt(), pick);
+            }
+            r = post("/api/cases/" + id + "/answers", body);
+        }
+        return r;
+    }
+
+    /** 국외 이전 쟁점만 해석 참고 절 하나를 인용한 A5 손 출력(나머지 쟁점은 첫 키). */
+    static String refOnlyForAbroad(ProviderRequest r) {
+        JsonNode out = JSON.readTree(answerFromInput(r, true));
+        for (JsonNode i : out.get("issues")) {
+            if ("국외 이전".equals(i.get("issue").asString())) {
+                ((ArrayNode) i.get("cites")).removeAll().add(REF_GUIDE);
+            }
+        }
+        return out.toString();
+    }
+
+    @Test
+    void onlyReferenceCiteRejectedRetryLlmFailedThenApi3() throws Exception {
+        List<String> seen = new java.util.concurrent.CopyOnWriteArrayList<>();
+        routes.put("A5_answer", r -> {
+            seen.add(r.user());
+            return FakeProvider.ok(refOnlyForAbroad(r));
+        });
+        Res r = runAbroad();
+        assertThat(r.status()).as(String.valueOf(r.body())).isEqualTo(503);
+        assertThat(r.body().get("code").asString()).isEqualTo("LLM_FAILED");
+        assertThat(r.body().get("details").get("action").asString()).isEqualTo("A5_SPECIFIC");
+        assertThat(r.body().get("details").get("error").asString()).contains("NO_ANSWER_BASIS").contains("국외 이전");
+        String id = r.body().get("details").get("case_id").asString();
+        assertThat(outcomes(id, "A5_answer")).containsExactly("CHECK_FAIL", "CHECK_FAIL");
+        assertThat(seen.get(1)).contains("[다시 요청]").contains("A7 인용 검증");
+        // 고친 출력(즉답 근거 키) → API 3 → 결과·판정
+        routes.put("A5_answer", x -> FakeProvider.ok(answerFromInput(x, true)));
+        Res again = post("/api/cases/" + id + "/retry", null);
+        assertThat(again.status()).as(String.valueOf(again.body())).isEqualTo(200);
+        assertThat(again.body().get("outcome").asString()).isEqualTo("RESULT");
+        JsonNode res = again.body().get("result");
+        assertThat(res.get("preliminary").asBoolean()).isFalse();
+        assertThat(res.get("flows").get(0).get("issues").toString()).contains("국외 이전");
+        assertThat(res.get("verify").get("problems")).isEmpty();
+        assertThat(jdbc.sql("SELECT CONCAT(step,' ',status) FROM steps WHERE case_id=? AND step IN ('A5','A7','A8') ORDER BY seq")
+                .param(id).query(String.class).list()).containsExactly("A5 LLM_FAILED", "A5 OK", "A7 OK", "A7 OK", "A8 OK");
+    }
+
+    /** A4 기록 해시 한 키를 바꾼다(재시도 사이 스냅샷이 바뀐 것과 같은 상태). */
+    static void tamperA4(String id, String name) {
+        Map<String, Object> row = jdbc.sql("SELECT seq, output_json FROM steps WHERE case_id=? AND step='A4' AND name=? "
+                + "ORDER BY seq DESC LIMIT 1").params(id, name).query().singleRow();
+        ObjectNode o = (ObjectNode) JSON.readTree(String.valueOf(row.get("output_json")));
+        ObjectNode src = (ObjectNode) o.get("sources");
+        String k = src.propertyNames().iterator().next();
+        src.put(k, "0".repeat(64));
+        jdbc.sql("UPDATE steps SET output_json=? WHERE case_id=? AND seq=?").params(o.toString(), id, row.get("seq")).update();
+    }
+
+    @Test
+    void a4DataMismatchReopenedOncePerInput() throws Exception {
+        routes.put("A5_answer", r -> FakeProvider.ok("JSON 아님"));
+        Res r = runExample();
+        assertThat(r.status()).isEqualTo(503);
+        String id = r.body().get("details").get("case_id").asString();
+        // ① A4 기록이 스냅샷과 다름 → 다시 열기 1회(기록) → A5 → A7 → A8
+        tamperA4(id, NextAction.A4_NAME);
+        routes.put("A5_answer", x -> FakeProvider.ok(answerFromInput(x, true)));
+        Res ok = post("/api/cases/" + id + "/retry", null);
+        assertThat(ok.status()).as(String.valueOf(ok.body())).isEqualTo(200);
+        assertThat(jdbc.sql("SELECT JSON_EXTRACT(output_json,'$.reopen_count') FROM steps WHERE case_id=? AND name=?")
+                .params(id, NextAction.A4_REOPEN_NAME).query(Integer.class).list()).containsExactly(1);
+        assertThat(jdbc.sql("SELECT JSON_EXTRACT(input_json,'$.a4_reopen_count') FROM steps WHERE case_id=? AND name=?")
+                .params(id, NextAction.A7_NAME).query(Integer.class).single()).isEqualTo(1);
+        assertThat(ok.body().get("result").get("verify").get("problems")).isEmpty();
+
+        // ② 다시 연 꾸러미도 기록과 다르면(같은 입력 안 두 번째) → LLM_FAILED, 더 열지 않음
+        routes.put("A5_answer", x -> FakeProvider.ok("JSON 아님"));
+        Res r2 = runExample();
+        String id2 = r2.body().get("details").get("case_id").asString();
+        tamperA4(id2, NextAction.A4_NAME);
+        Res f1 = post("/api/cases/" + id2 + "/retry", null);   // 다시 열기 1회 + A5 실패
+        assertThat(f1.status()).isEqualTo(503);
+        tamperA4(id2, NextAction.A4_REOPEN_NAME);
+        Res f2 = post("/api/cases/" + id2 + "/retry", null);
+        assertThat(f2.status()).isEqualTo(503);
+        assertThat(f2.body().get("details").get("error").asString()).contains("A7 데이터 검사");
+        assertThat(jdbc.sql("SELECT COUNT(*) FROM steps WHERE case_id=? AND name=?").params(id2, NextAction.A4_REOPEN_NAME)
+                .query(Long.class).single()).isEqualTo(1L);
+    }
 }

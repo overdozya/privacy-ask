@@ -86,11 +86,20 @@ public class SpecificAnswerStep {
 
     public Result run(CaseState st, List<FlowIn> flows, PackageOpener.Opened opened, PackageOpener.RefDate ref,
                       List<Askable> askable, Instant deadline) {
+        return run(st, flows, opened, ref, askable, deadline, null);
+    }
+
+    /** extra: 이 단계 업무 검사 뒤에 더 보는 검사(S9 A7 인용 검증, 메인 허락). 거절이면 이유를 붙여 1회 다시, 또 거절이면 LLM_FAILED. */
+    public Result run(CaseState st, List<FlowIn> flows, PackageOpener.Opened opened, PackageOpener.RefDate ref,
+                      List<Askable> askable, Instant deadline, LlmGateway.Check<AnswerOutput> extra) {
         KnowledgeSnapshot k = knowledge.snapshot();
         Map<String, Object> in = input(k, st, flows, opened, ref);
         Set<String> rows = ledgerRowIds(st);
         LlmResult<AnswerOutput> r = llm.call(PROMPT, in, AnswerOutput.class,
-                out -> check(k, known(st), flows, opened.keys(), rows, out),
+                out -> {
+                    String bad = check(k, known(st), flows, opened.keys(), rows, out);
+                    return bad != null || extra == null ? bad : extra.apply(out);
+                },
                 new CallContext(st.caseRow().caseId(), null, deadline, false));
         int chars = json.writeValueAsString(in).length();
         return save(st, in, r, flows, opened, ref, askable, chars);

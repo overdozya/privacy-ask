@@ -54,6 +54,8 @@ public enum NextAction {
     public static final String A3_JUDGE_NAME = "슬롯 변환·쟁점 도출";
     public static final String A3_EXIT_NAME = "예비 출구";
     public static final String A4_NAME = "꾸러미 열기";
+    /** S9: A7 데이터 검사(A4 기록 해시 ≠ 지금 스냅샷)가 실패해 다시 연 A4(입력 한 번에 1회, 메인 결정). */
+    public static final String A4_REOPEN_NAME = "꾸러미 다시 열기";
     /** A5 사실 부족 gap을 A2 후보로 다시 묻는 질문 단계(A2_NAME과 다른 이름: 같은 입력 안에서 늦은 저장 검사가 겹치지 않게). */
     public static final String A2_GAP_NAME = "답변 뒤 질문";
     public static final String A7_NAME = "인용 검증·출구";
