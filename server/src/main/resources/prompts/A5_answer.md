@@ -1,4 +1,4 @@
-<!-- version: 4; max_output_tokens: 16384; thinking: low -->
+<!-- version: 5; max_output_tokens: 16384; thinking: low -->
 이 단계는 답변(A5, 구체 사안)이다. 입력은 사실 목록 `fact_ids`, 꾸러미 원문 `sources`가 앞에 오고 사안 글·사실·쟁점이 뒤에 온다. 코드가 이미 정한 흐름별 쟁점·등급(`flows[].issues`)마다, 사실(`flows[].facts`)과 처리 원장 대조 결과(`flows[].ledger`, 행 글은 `ledger_rows`)와 그 쟁점 꾸러미의 원문(`sources`, 쟁점마다 쓸 수 있는 키는 `flows[].issues[].keys`)만 보고 현업 담당자에게 줄 의견과 조치를 쓴다. 쟁점·등급·출구는 코드가 정했으니 바꾸거나 더하지 않는다.
 
 쟁점마다 `issues`에 하나씩(빠뜨리지 않고, 두 번 내지 않는다):
@@ -23,7 +23,7 @@
 
 안내서 보조 검색 도구(입력에 `tools`가 있을 때만):
 - `tools.remaining`은 이 사안에 남은 도구 호출 수다. 0이거나 `tools`가 없으면 `tool_requests`는 빈 목록으로 둔다.
-- `INTERPRETATION`·`OUTSIDE_PACKAGE` gap을 내야 할 때, 안내서의 해석이 그 부족을 메울 수 있으면 `tool_requests`에 요청한다(남은 수 안에서, 필요한 것을 한 번에).
+- `INTERPRETATION`·`OUTSIDE_PACKAGE` gap을 내고 `tools.remaining`이 1 이상이면, 그 gap마다 `search_guides`를 `tool_requests`에 함께 낸다(남은 수 안에서, 필요한 것을 한 번에). 이미 `tools.results`에 같은 쟁점의 검색 결과가 있으면 다시 요청하지 않는다.
   - `search_guides`: 안내서에서 찾을 짧은 검색어를 `query`에(문의 글을 옮기지 말고 쟁점·요건 낱말로), `flow`·`issue`는 그 gap의 쟁점. 법령은 이 도구로 찾지 않는다.
   - `read_section`: `sources`에서 `text_omitted`가 참인 절(글을 뺀 안내서 절)을 읽어야 결론을 쓸 수 있으면 그 `key`를 `section_id`에.
   - `why`: 왜 필요한지 한 줄.

@@ -116,6 +116,12 @@ public class SpecificAnswerStep {
     /** A5 호출만(저장하지 않음). 도구 라운드는 흐름(pa/flow)이 돌리고, 끝에 save로 A6 단계들과 함께 한 번에 쓴다. */
     public Call call(CaseState st, List<FlowIn> flows, PackageOpener.Opened opened, PackageOpener.RefDate ref,
                      ToolView tv, Instant deadline, LlmGateway.Check<AnswerOutput> extra) {
+        return call(st, flows, opened, ref, tv, deadline, extra, false);
+    }
+
+    /** discarded = 견주기용 호출(실제 호출 실행기, 저장하지 않음: llm_call_logs.discarded=1). */
+    public Call call(CaseState st, List<FlowIn> flows, PackageOpener.Opened opened, PackageOpener.RefDate ref,
+                     ToolView tv, Instant deadline, LlmGateway.Check<AnswerOutput> extra, boolean discarded) {
         KnowledgeSnapshot k = knowledge.snapshot();
         Map<String, Object> in = input(k, st, flows, opened, ref, tv);
         Set<String> rows = ledgerRowIds(st);
@@ -126,8 +132,14 @@ public class SpecificAnswerStep {
                     String bad = check(k, known(st), flows, keys, rows, out, tv, omitted);
                     return bad != null || extra == null ? bad : extra.apply(out);
                 },
-                new CallContext(st.caseRow().caseId(), null, deadline, false));
+                new CallContext(st.caseRow().caseId(), null, deadline, discarded));
         return new Call(in, r, json.writeValueAsString(in).length(), tv);
+    }
+
+    /** 저장하지 않고 답만 짓는다(견주기용). 실패한 호출이면 null. */
+    public Answer preview(CaseState st, Call c, List<FlowIn> flows, PackageOpener.Opened opened, PackageOpener.RefDate ref) {
+        return c.r().ok() ? answer(knowledge.snapshot(), st, flows, opened, ref, c.r().value(), List.of(),
+                new Askable[1], c.view()) : null;
     }
 
     /** 인용해도 되는 키: 이번 꾸러미 + 도구가 글을 붙인 절. */

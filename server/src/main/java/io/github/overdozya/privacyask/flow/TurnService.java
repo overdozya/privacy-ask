@@ -954,10 +954,24 @@ public class TurnService {
     private SpecificAnswerStep.Result a5WithTools(Ctx ctx, CaseState st, Opening op, List<SpecificAnswerStep.FlowIn> flows,
                                                   List<SpecificAnswerStep.Askable> ask0, Map<String, String> recorded) {
         GuideTools tools = stages.tools();
+        boolean reduce = tools != null && tools.enabled() && tools.props().reduceInput();
+        Rounds rs = a5Rounds(ctx, st, op, flows, recorded, reduce, false);
+        return stages.specific().save(st, rs.last(), flows, op.opened(), op.ref(), ask0, rs.callIds(), rs.toolSteps());
+    }
+
+    /** A5(+A6) 라운드 결과(저장 전). calls = 라운드마다 마지막 호출(입력 글자 수·결과·보기). */
+    record Rounds(SpecificAnswerStep.Call last, List<SpecificAnswerStep.Call> calls, List<Long> callIds,
+                  List<NewStep> toolSteps) {}
+
+    /** discarded = 견주기용(실제 호출 실행기): 호출을 버린 것으로 기록. 이 함수는 아무것도 저장하지 않는다. */
+    Rounds a5Rounds(Ctx ctx, CaseState st, Opening op, List<SpecificAnswerStep.FlowIn> flows, Map<String, String> recorded,
+                    boolean reduce, boolean discarded) {
+        GuideTools tools = stages.tools();
         boolean on = tools != null && tools.enabled();
         int max = on ? tools.props().maxCallsPerCase() : 0;
-        boolean reduce = on && tools.props().reduceInput();
-        int used = on ? a6Used(st) : 0;
+        reduce = on && reduce;
+        int used = on && !discarded ? a6Used(st) : 0;   // 견주기는 새 사안처럼 상한을 처음부터 센다
+        List<SpecificAnswerStep.Call> calls = new ArrayList<>();
         CitationVerifier verifier = new CitationVerifier(knowledge.snapshot());
         List<Map<String, Object>> results = new ArrayList<>();
         Map<String, PackageOpener.Source> found = new LinkedHashMap<>();
@@ -973,8 +987,9 @@ public class TurnService {
                     CitationVerifier.withA6(CitationVerifier.sources(op.opened()), found), recorded, ledgerRows(st),
                     st.caseRow().ledgerVersion(), op.opened().date(), true);
             c = llmStage(ctx, () -> stages.specific().call(st, flows, op.opened(), op.ref(), tv, ctx.deadline,
-                    out -> verifier.verify(vb, CitationVerifier.issues(out)).reason()), x -> x.r().callIds());
+                    out -> verifier.verify(vb, CitationVerifier.issues(out)).reason(), discarded), x -> x.r().callIds());
             callIds.addAll(c.r().callIds());
+            calls.add(c);
             if (!c.r().ok() || !on) {
                 break;
             }
@@ -1000,8 +1015,49 @@ public class TurnService {
                 toolSteps.add(runTool(ctx.caseId, tools, op, q, round, used, max, results, found, c.r().callIds()));
             }
         }
-        final SpecificAnswerStep.Call last = c;
-        return stages.specific().save(st, last, flows, op.opened(), op.ref(), ask0, callIds, toolSteps);
+        return new Rounds(c, List.copyOf(calls), List.copyOf(callIds), List.copyOf(toolSteps));
+    }
+
+    /**
+     * 견주기(S10 실제 호출 실행기): 닫힌 사안의 지금 상태로 A5(+A6) 라운드를 저장 없이 다시 돌리고(호출은 버린 것으로 기록), 그 답으로
+     * A7 검증·최종 출구까지 계산한다. reduce = 입력 줄이기.
+     */
+    public record Probe(List<Map<String, Object>> rounds, List<Map<String, Object>> tools, Answer answer,
+                        CitationVerifier.Report report, ExitAssembler.FinalExit exit, List<Long> callIds) {}
+
+    public Probe probeA5(String caseId, boolean reduce, java.time.Duration budget) {
+        CaseState st = reader.load(caseId).orElseThrow();
+        Ctx ctx = new Ctx(new TurnMeter(), java.time.Instant.now().plus(budget));
+        ctx.caseId = caseId;
+        Opening op = opening(st);
+        List<SpecificAnswerStep.FlowIn> flows = flowsIn(op.judgment());
+        Map<String, String> recorded = a4Record(caseId);
+        Rounds rs = a5Rounds(ctx, st, op, flows, recorded, reduce, true);
+        List<Map<String, Object>> rounds = new ArrayList<>();
+        for (SpecificAnswerStep.Call c : rs.calls()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("input_chars", c.chars());
+            m.put("status", c.r().status().name());
+            m.put("call_ids", c.r().callIds());
+            m.put("tool_requests", c.r().ok() ? c.r().value().toolRequests() : List.of());
+            m.put("gaps", c.r().ok() ? c.r().value().gaps() : List.of());
+            rounds.add(m);
+        }
+        List<Map<String, Object>> tools = new ArrayList<>();
+        rs.toolSteps().forEach(t -> tools.add(Map.of("name", t.name(), "input", t.input(), "output", t.output())));
+        Answer a = stages.specific().preview(st, rs.last(), flows, op.opened(), op.ref());
+        if (a == null) {
+            return new Probe(rounds, tools, null, null, null, rs.callIds());
+        }
+        KnowledgeSnapshot k = knowledge.snapshot();
+        CitationVerifier.Report rep = new CitationVerifier(k).verify(citationBasis(ctx, st, a, op), CitationVerifier.issues(a));
+        ExitAssembler ea = new ExitAssembler(new ExitPolicy(k.ruleSet().exitPolicy()));
+        CaseJudge.Judgment j = judges.judge(st, externalReasons(ctx, st));
+        QuestionSelector.Selection sel = questions.next(st, facts.cloudItFlows(caseId), lawReasons(ctx, st));
+        Set<String> exitFacts = new LinkedHashSet<>();
+        sel.worth().stream().filter(x -> x.impact() == QuestionSelector.Impact.EXIT).forEach(x ->
+                exitFacts.add((x.flowNo() == null ? ExitAssembler.COMMON : String.valueOf(x.flowNo())) + ":" + x.factId()));
+        return new Probe(rounds, tools, a, rep, ea.specific(j, a, rep, exitFacts), rs.callIds());
     }
 
     /** 도구 하나를 돌려 결과·찾은 절에 더하고 A6 단계(쓰기 전)를 돌려준다. 단계에는 키·해시·점수·ms만(글은 스냅샷에서 다시 나온다). */
