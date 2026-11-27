@@ -4,36 +4,19 @@
   "properties": {
     "signals": {
       "type": "array",
+      "maxItems": 12,
       "items": {
         "type": "object",
         "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "OWN_CASE",
-              "ACTION",
-              "INCIDENT",
-              "RIGHTS_REQUEST",
-              "LAW_AREA"
-            ]
-          },
-          "quote": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
+          "kind": { "type": "string", "enum": ["OWN_CASE", "ACTION", "INCIDENT", "RIGHTS_REQUEST", "LAW_AREA"] },
+          "quote": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 100 }
         },
-        "required": [
-          "kind",
-          "quote"
-        ],
+        "required": ["kind", "quote"],
         "additionalProperties": false
       }
     }
   },
-  "required": [
-    "signals"
-  ],
+  "required": ["signals"],
   "additionalProperties": false
 }

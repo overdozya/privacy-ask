@@ -42,7 +42,7 @@ class StageDbTest {
     }
 
     static final String A1_OK = """
-            {"flows":[{"flow":1,"label":"고지 문자 발송 위탁","origin":"회사","destination":"국내 문자 발송 대행 업체","service_name":"T 멤버십"}],
+            {"flows":[{"flow":1,"label":"고지 문자 발송 위탁","origin":"회사","destination":"국내 문자 발송 대행 업체","service_name":"T 멤버십","counterparty_cloud_it":false}],
              "facts":[
               {"fact":"F-S1","flows":[],"values":[{"label":"서비스명(자유 입력)","detail":"T 멤버십"}],"status":"CONFIRMED","quote":"저희 T 멤버십 회원에게"},
               {"fact":"F-S3","flows":[],"values":[{"label":"날짜","detail":"2026-12-01"}],"status":"INFERRED","quote":"다음 달부터"},
@@ -52,7 +52,7 @@ class StageDbTest {
 
     static String a1With(String fact) {
         return """
-                {"flows":[{"flow":1,"label":"고지 문자 발송 위탁","origin":"회사","destination":"문자 발송 대행 업체"}],
+                {"flows":[{"flow":1,"label":"고지 문자 발송 위탁","origin":"회사","destination":"문자 발송 대행 업체","counterparty_cloud_it":false}],
                  "facts":[%s]}""".formatted(fact);
     }
 
@@ -206,7 +206,7 @@ class StageDbTest {
 
         @Test
         void flowNumberingAndEmptyFlows() {
-            rejected("{\"flows\":[{\"flow\":2,\"label\":\"a\",\"origin\":\"b\",\"destination\":\"c\"}],\"facts\":[]}", "차례");
+            rejected("{\"flows\":[{\"flow\":2,\"label\":\"a\",\"origin\":\"b\",\"destination\":\"c\",\"counterparty_cloud_it\":null}],\"facts\":[]}", "차례");
             rejected("{\"flows\":[],\"facts\":[]}", "흐름이 없음");
         }
 
@@ -390,7 +390,7 @@ class StageDbTest {
         void noServiceMeansNoLedgerFacts() {
             String id = fx.newCase("저희 팀이 고객 상담 녹취를 외부 업체에 맡기려 합니다.", null);
             fx.fake.thenText("""
-                    {"flows":[{"flow":1,"label":"상담 녹취 위탁","origin":"회사","destination":"외부 업체"}],
+                    {"flows":[{"flow":1,"label":"상담 녹취 위탁","origin":"회사","destination":"외부 업체","counterparty_cloud_it":null}],
                      "facts":[{"fact":"F-T1","flows":[1],"values":[{"label":"예"}],"status":"CONFIRMED","quote":"외부 업체에 맡기려 합니다"}]}""");
             fx.facts.runInquiry(fx.state(id), fx.deadline());
             int calls = fx.fake.requests().size();
@@ -445,6 +445,47 @@ class StageDbTest {
                     "이미 찾은 쟁점");
             rejected("{\"flags\":[{\"kind\":\"OUTSIDE\",\"issue\":\"국외 이전\",\"quote\":\"맡기려고\",\"reason\":\"x\"}]}",
                     "목록 안");
+        }
+    }
+
+    @Nested
+    class CloudIt {
+        @Test
+        void counterpartyCloudItIsStoredInStepAndRead() {
+            String id = fx.newCase("저희 앱 주문 기록을 클라우드 업체 서버에 옮기고, 같은 기록을 제휴 카드사에도 넘기려 합니다.", null);
+            fx.fake.thenText("""
+                    {"flows":[{"flow":1,"label":"클라우드 보관","origin":"회사","destination":"클라우드 업체","counterparty_cloud_it":true},
+                              {"flow":2,"label":"카드사 제공","origin":"회사","destination":"제휴 카드사","counterparty_cloud_it":false},
+                              {"flow":3,"label":"모름","origin":"회사","destination":"어딘가","counterparty_cloud_it":null}],
+                     "facts":[{"fact":"F-T1","flows":[1,2],"values":[{"label":"예"}],"status":"CONFIRMED","quote":"제휴 카드사에도 넘기려"}]}""");
+            assertThat(fx.facts.runInquiry(fx.state(id), fx.deadline()).status()).isEqualTo(LlmResult.Status.OK);
+            assertThat(fx.facts.counterpartyCloudIt(id)).containsExactly(Map.entry(1, true), Map.entry(2, false));
+            assertThat(fx.facts.cloudItFlows(id)).containsExactly(1);
+        }
+
+        @Test
+        void missingFieldFailsStrictSchema() {
+            String id = fx.newCase(CONTENT, null);
+            String bad = "{\"flows\":[{\"flow\":1,\"label\":\"a\",\"origin\":\"b\",\"destination\":\"c\"}],\"facts\":[]}";
+            fx.fake.thenText(bad).thenText(bad);
+            FactExtractStep.Result r = fx.facts.runInquiry(fx.state(id), fx.deadline());
+            assertThat(r.failed()).isTrue();
+            assertThat(r.error()).contains("스키마 위반").contains("counterparty_cloud_it");
+        }
+
+        @Test
+        void strictLimitsAreValidatedButNotSent() {
+            // 보낸 스키마에는 길이 제한이 없고, 검증은 엄격판(label 200자)으로 거절 → 다시 → LLM_FAILED
+            String id = fx.newCase(CONTENT, null);
+            String bad = "{\"flows\":[{\"flow\":1,\"label\":\"" + "가".repeat(201)
+                    + "\",\"origin\":\"b\",\"destination\":\"c\",\"counterparty_cloud_it\":null}],\"facts\":[]}";
+            fx.fake.thenText(bad).thenText(bad);
+            FactExtractStep.Result r = fx.facts.runInquiry(fx.state(id), fx.deadline());
+            assertThat(r.failed()).isTrue();
+            assertThat(r.error()).contains("스키마 위반");
+            var sent = fx.fake.requests().getLast().schema();
+            assertThat(sent.toString()).doesNotContain("maxLength").doesNotContain("maxItems").doesNotContain("minimum")
+                    .contains("counterparty_cloud_it");
         }
     }
 

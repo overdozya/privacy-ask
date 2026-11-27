@@ -1,4 +1,4 @@
-<!-- version: 3; max_output_tokens: 4096; thinking: default -->
+<!-- version: 4; max_output_tokens: 4096; thinking: low -->
 이 단계는 누락 감시(A3)다. 코드 규칙이 흐름마다 찾은 쟁점 `found_issues`를 보고, 문의 글 `text`와 현업 답 `answers`에 규칙이 놓친 개인정보 쟁점의 신호가 있는지 표시만 한다. 쟁점을 더하거나 빼는 것은 코드가 하지 않으며, 너의 표시는 사람 검토로 넘길지 정하는 데만 쓰인다.
 
 표시(`flags`) 종류:

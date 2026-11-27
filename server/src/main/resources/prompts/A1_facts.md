@@ -1,4 +1,4 @@
-<!-- version: 3; max_output_tokens: 8192; thinking: default -->
+<!-- version: 4; max_output_tokens: 8192; thinking: default -->
 이 단계는 사실 추출(A1)이다. 글 `text`(`source`가 `INQUIRY`면 첫 문의, `ANSWER`면 질문 `question`에 대한 현업의 자유 답)를 읽고, 처리 흐름과 사실 기준표 `facts`의 사실 값을 뽑는다.
 
 흐름(`flows`):
@@ -6,6 +6,7 @@
 - `INQUIRY`면 흐름을 1부터 차례로 번호 매겨 모두 낸다. 처리가 하나라도 있으면 흐름은 하나 이상이다.
 - `ANSWER`면 이미 있는 흐름 `known_flows`를 다시 내지 않는다. 답에서 새 흐름이 드러날 때만 그다음 번호로 낸다.
 - `label`은 짧은 이름, `origin`·`destination`은 출발·도착(회사 이름이 글에 없으면 '제휴 카페 브랜드'처럼 역할로), `service_name`은 그 흐름의 서비스 이름이 글에 있을 때만.
+- `counterparty_cloud_it`: 그 흐름에서 정보를 받거나 맡는 상대가 클라우드·서버·IT 운영 회사(호스팅, 저장 공간, 시스템 운영·유지보수)면 `true`, 그런 회사가 아니면 `false`, 글로 알 수 없으면 `null`. 회사 안에서만 쓰는 흐름은 `false`.
 
 사실(`facts`):
 - 기준표에 있는 사실 ID만 쓴다. `common: true`인 사실은 사안 전체의 사실이라 `flows`를 빈 목록으로, 나머지는 해당 흐름 번호를 `flows`에 모두 적는다(여러 흐름에 같은 값이면 한 번에).

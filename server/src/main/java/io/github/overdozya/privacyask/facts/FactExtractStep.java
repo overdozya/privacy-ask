@@ -340,6 +340,38 @@ public class FactExtractStep {
         }
     }
 
+    /**
+     * 흐름마다 A1이 낸 "상대가 클라우드·IT 운영사인가"(flows[].counterparty_cloud_it). 저장 위치 = 그 흐름을 만든 A1 LLM 단계의
+     * steps.output_json(따로 칸을 두지 않음). 모름(null)·칸 없음은 빠진다. 뒤 단계가 같은 흐름을 다시 내면 뒤 것.
+     */
+    public Map<Integer, Boolean> counterpartyCloudIt(String caseId) {
+        Map<Integer, Boolean> out = new java.util.TreeMap<>();
+        jdbc.sql("""
+                SELECT jt.flow, JSON_UNQUOTE(jt.c) AS c FROM steps s,
+                  JSON_TABLE(s.output_json, '$.flows[*]' COLUMNS (flow INT PATH '$.flow', c JSON PATH '$.counterparty_cloud_it')) jt
+                WHERE s.case_id=? AND s.step='A1' AND s.actor='LLM' AND s.status IN ('OK','RETRY_OK')
+                ORDER BY s.seq""")
+                .param(caseId).query((rs, i) -> {
+                    String c = rs.getString("c");
+                    if ("true".equals(c) || "false".equals(c)) {
+                        out.put(rs.getInt("flow"), Boolean.valueOf(c));
+                    }
+                    return null;
+                }).list();
+        return out;
+    }
+
+    /** 상대가 클라우드·IT 운영사인 흐름 번호(= A2 QuestionService.next의 cloudFlows). */
+    public Set<Integer> cloudItFlows(String caseId) {
+        Set<Integer> s = new TreeSet<>();
+        counterpartyCloudIt(caseId).forEach((k, v) -> {
+            if (v) {
+                s.add(k);
+            }
+        });
+        return s;
+    }
+
     static String blankToNull(String s) {
         return s == null || s.isBlank() ? null : s;
     }
