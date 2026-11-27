@@ -34,9 +34,7 @@ server:
 
 app:
   data-dir: ${PRIVACYASK_DATA_DIR:../data}
-  knowledge:
-    # 기동 때 지식 테이블 행 수를 manifest.json과 견준다(06 7절 S2 ④). 스냅샷 전체 검사는 S4
-    row-check: true
+  # 지식 스냅샷(pa/knowledge)이 기동 때 data-dir/out/mysql/manifest.json과 행 수·참조를 견준다(06 3.1)
   llm:
     provider: ${LLM_PROVIDER:fake}
     model: ${LLM_MODEL:gemini-3.6-flash}

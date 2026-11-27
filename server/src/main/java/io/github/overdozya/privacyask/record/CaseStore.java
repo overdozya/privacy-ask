@@ -100,6 +100,11 @@ public class CaseStore {
         if (!k().packages().hasVersion(c.packageVersion())) {
             throw new Rejected("C11", "꾸러미 판 '" + c.packageVersion() + "'가 지식에 없음");
         }
+        // 새 사안은 지금 판으로만 시작한다(메인 결정 2026-11-27): 지난 판(v1, 고정)의 조건식은 지금 슬롯 사전 밖 값을 쓴다
+        if (!c.packageVersion().equals(k().packages().currentVersion())) {
+            throw new Rejected("C11", "꾸러미 판 '" + c.packageVersion() + "'는 지금 판 '"
+                    + k().packages().currentVersion() + "'가 아님(새 사안은 지금 판으로만)");
+        }
         if (!Objects.equals(c.ruleSetVersion(), k().catalog().ruleSetVersion())) {
             throw new Rejected("C12", "규칙 세트 '" + c.ruleSetVersion() + "'");
         }

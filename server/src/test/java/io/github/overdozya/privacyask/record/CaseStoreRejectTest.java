@@ -157,6 +157,19 @@ class CaseStoreRejectTest {
         }
 
         @Test
+        void c11_newCaseOnPastPackageVersion() {
+            // v1은 지식에 있는 지난 판: 새 사안은 지금 판(v2)으로만
+            assertThat(LoadedDb.snapshot().packages().hasVersion("v1")).isTrue();
+            String id = UUID.randomUUID().toString();
+            assertThatThrownBy(() -> fx.store.addCase(new NewCase(id, "요청자", "문의", null, "v1.0", "v1", null, T)))
+                    .isInstanceOfSatisfying(Rejected.class, r -> {
+                        assertThat(r.code()).isEqualTo("C11");
+                        assertThat(r.detail()).contains("지금 판 'v2'가 아님");
+                    });
+            assertThat(fx.one("SELECT COUNT(*) FROM cases WHERE case_id=?", id)).isZero();
+        }
+
+        @Test
         void c12_ruleSetVersionDiffers() {
             String id = UUID.randomUUID().toString();
             rejects("C12", () -> fx.store.addCase(new NewCase(id, "요청자", "문의", null, "v0.9", "v2", null, T)));

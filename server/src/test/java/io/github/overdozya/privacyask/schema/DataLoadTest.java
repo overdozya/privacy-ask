@@ -18,7 +18,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.MountableFile;
 
-import io.github.overdozya.privacyask.common.LoadedRowCheck;
+import io.github.overdozya.privacyask.knowledge.Knowledge;
+import io.github.overdozya.privacyask.knowledge.KnowledgeLoader;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -26,7 +27,7 @@ import tools.jackson.databind.json.JsonMapper;
  * 레포 밖 적재 파일 4개(data/out/mysql)가 V1~V7 스키마에 그대로 들어가는지(06 2.5, 7절 S2 ③④).
  * 파일이 없으면(공개 레포만 받은 경우) 건너뛴다.
  */
-@SpringBootTest(properties = { "app.llm.provider=fake", "app.knowledge.row-check=false" })
+@SpringBootTest(properties = { "app.llm.provider=fake" })
 @Testcontainers(disabledWithoutDocker = true)
 class DataLoadTest {
     static final Path DIR = Path.of(System.getProperty("privacyask.data-dir", "../data"), "out", "mysql");
@@ -61,8 +62,11 @@ class DataLoadTest {
             actual += n;
         }
         assertThat(actual).isEqualTo(expected);
-        LoadedRowCheck.Result check = new LoadedRowCheck(jdbc, DIR.getParent().getParent().toString()).check();
-        assertThat(check.state()).isEqualTo(LoadedRowCheck.State.OK);
+        // 기동 검사(행 수 = manifest·참조, 06 3.1)는 지식 스냅샷이 한다
+        JsonMapper json = JsonMapper.builder().build();
+        Knowledge k = Knowledge.load(new KnowledgeLoader(jdbc, json), DIR.resolve("manifest.json"), json);
+        assertThat(k.isLoaded()).isTrue();
+        assertThat(k.snapshot().stats().totalRows()).isEqualTo(expected);
         // 해시 대상 글이 그대로 들어갔는지 하나: sha256(text) = text_hash
         assertThat(jdbc.sql("SELECT COUNT(*) FROM kb_chunks WHERE SHA2(text, 256) <> text_hash").query(Long.class).single())
                 .isZero();

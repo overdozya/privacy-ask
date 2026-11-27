@@ -30,7 +30,7 @@ import io.github.overdozya.privacyask.llm.LlmGateway;
 import io.github.overdozya.privacyask.common.AppClock;
 
 /** 빈 MySQL 8.4에 V1~V7이 들어가고 칸 제약이 실제로 막는지(06 2.2·2.3, 7절 S2 ①②). */
-@SpringBootTest(properties = { "app.llm.provider=fake", "app.knowledge.row-check=false" })
+@SpringBootTest(properties = { "app.llm.provider=fake" })
 @Testcontainers(disabledWithoutDocker = true)
 @Transactional
 class SchemaMigrationTest {
