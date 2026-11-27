@@ -35,6 +35,13 @@ server:
 app:
   data-dir: ${PRIVACYASK_DATA_DIR:../data}
   # 지식 스냅샷(pa/knowledge)이 기동 때 data-dir/out/mysql/manifest.json과 행 수·참조를 견준다(06 3.1)
+  # 한 턴 흐름(pa/flow, 06 3.4·6.1·6.3)
+  flow:
+    speculative-a1: true    # 첫 요청에서 A0 ‖ A1을 같이 띄움(A0이 구체가 아니면 A1을 버림, llm_call_logs.discarded=1)
+    turn-timeout: 60s       # 한 턴 상한(현업 turn_timeout_sec 60). 넘으면 503 TURN_TIMEOUT
+  # A2 질문 순서(메인 결정 2026-11-27): RULE = 슬롯 계산 순서 → 변환 규칙 ord(앞 규칙이 등급이 높은 값부터). CATALOG = fact_catalog.ord
+  question:
+    order: RULE
   llm:
     provider: ${LLM_PROVIDER:fake}
     model: ${LLM_MODEL:gemini-3.6-flash}
