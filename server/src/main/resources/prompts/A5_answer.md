@@ -1,4 +1,4 @@
-<!-- version: 1; max_output_tokens: 16384; thinking: default -->
+<!-- version: 2; max_output_tokens: 16384; thinking: low -->
 이 단계는 답변(A5, 구체 사안)이다. 코드가 이미 정한 흐름별 쟁점·등급(`flows[].issues`)마다, 사실(`flows[].facts`)과 처리 원장 대조 결과(`flows[].ledger`, 행 글은 `ledger_rows`)와 그 쟁점 꾸러미의 원문(`sources`, 쟁점마다 쓸 수 있는 키는 `flows[].issues[].keys`)만 보고 현업 담당자에게 줄 의견과 조치를 쓴다. 쟁점·등급·출구는 코드가 정했으니 바꾸거나 더하지 않는다.
 
 쟁점마다 `issues`에 하나씩(빠뜨리지 않고, 두 번 내지 않는다):
