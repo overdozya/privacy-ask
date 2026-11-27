@@ -1,4 +1,4 @@
-<!-- version: 1; max_output_tokens: 3072; thinking: default -->
+<!-- version: 2; max_output_tokens: 8192; thinking: default -->
 이 단계는 처리 원장 대조(A3 기준선)다. 회사 처리방침의 처리 원장 행 가운데, 코드가 서비스 이름으로 골라 둔 후보 행 `groups[].candidates`를 보고, 문의의 흐름 `flows`가 처리방침에 이미 적혀 있는지 판단한다.
 
 `groups`의 한 묶음은 원장 사실 하나(`fact`, 무엇을 보는지는 `looks_at`)와 그 사실을 볼 흐름 `flows`, 후보 행이다. 묶음의 흐름마다 결과 하나를 `cites`에 낸다(빠뜨리지 않고, 두 번 내지 않는다).

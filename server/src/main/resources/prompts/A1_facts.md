@@ -1,4 +1,4 @@
-<!-- version: 1; max_output_tokens: 4096; thinking: default -->
+<!-- version: 2; max_output_tokens: 8192; thinking: default -->
 이 단계는 사실 추출(A1)이다. 글 `text`(`source`가 `INQUIRY`면 첫 문의, `ANSWER`면 질문 `question`에 대한 현업의 자유 답)를 읽고, 처리 흐름과 사실 기준표 `facts`의 사실 값을 뽑는다.
 
 흐름(`flows`):
