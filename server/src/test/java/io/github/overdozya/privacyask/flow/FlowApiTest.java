@@ -73,7 +73,9 @@ class FlowApiTest {
                         "--spring.datasource.url=" + LoadedDb.url(LoadedDb.container().getDatabaseName()),
                         "--spring.datasource.username=" + LoadedDb.container().getUsername(),
                         "--spring.datasource.password=" + LoadedDb.container().getPassword(),
-                        "--app.llm.provider=fake", "--app.data-dir=" + LoadedDb.DATA);
+                        "--app.llm.provider=fake", "--app.data-dir=" + LoadedDb.DATA,
+                        // S10b: 입력 줄이기 기본 켬. 예시 재현표·손 출력은 꾸러미 안내서 절 글을 다 받은 판 기준이라 여기서는 끈다(줄이기는 ToolViewTest)
+                        "--app.tools.reduce-input=false");
         fake = (FakeProvider) ctx.getBean(LlmProvider.class);
         fake.fallback(r -> routes.getOrDefault(r.promptId(), x -> FakeProvider.ok("{}")).apply(r));
         base = "http://127.0.0.1:" + ctx.getEnvironment().getProperty("local.server.port");

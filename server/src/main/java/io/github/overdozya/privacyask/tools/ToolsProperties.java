@@ -13,7 +13,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param modelDir        질의 임베딩 ONNX 폴더(model_int8pc.onnx·tokenizer.json). 비우면 {app.data-dir}/models/kure-v3-onnx.
  *                        없으면 글자 검색만으로 돈다(단계 기록 mode TEXT_ONLY)
  * @param warmup          기동 뒤 모델을 미리 띄움(벡터가 적재돼 있을 때만, 따로 스레드)
- * @param reduceInput     A5 입력 줄이기(S10): '해석' 역할 안내서 절은 키·경로·제목만 보내고 글은 read_section으로 읽게 함
+ * @param reduceInput     A5 입력 줄이기(S10): '해석' 역할 안내서 절은 키·경로·제목만 보내고 글은 read_section으로 읽게 함.
+ *                        기본 켬(S10b 메인 결정, 최종은 평가에서 켬·끔을 견줘 다시 정함)
  */
 @ConfigurationProperties("app.tools")
 public record ToolsProperties(
@@ -23,4 +24,4 @@ public record ToolsProperties(
         @DefaultValue("6000") int readMaxChars,
         String modelDir,
         @DefaultValue("true") boolean warmup,
-        @DefaultValue("false") boolean reduceInput) {}
+        @DefaultValue("true") boolean reduceInput) {}

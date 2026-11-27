@@ -972,6 +972,7 @@ public class TurnService {
         reduce = on && reduce;
         int used = on && !discarded ? a6Used(st) : 0;   // 견주기는 새 사안처럼 상한을 처음부터 센다
         List<SpecificAnswerStep.Call> calls = new ArrayList<>();
+        List<SpecificAnswerStep.Interp> prior = new ArrayList<>();   // S10b: 도구를 부른 라운드의 해석 필요 gap
         CitationVerifier verifier = new CitationVerifier(knowledge.snapshot());
         List<Map<String, Object>> results = new ArrayList<>();
         Map<String, PackageOpener.Source> found = new LinkedHashMap<>();
@@ -982,7 +983,7 @@ public class TurnService {
         while (true) {
             round++;
             SpecificAnswerStep.ToolView tv = new SpecificAnswerStep.ToolView(on, Math.max(0, max - used), reduce,
-                    List.copyOf(results), Map.copyOf(found));
+                    List.copyOf(results), Map.copyOf(found), List.copyOf(prior));
             CitationVerifier.Basis vb = new CitationVerifier.Basis(SpecificAnswerStep.allowedKeys(op.opened(), tv),
                     CitationVerifier.withA6(CitationVerifier.sources(op.opened()), found), recorded, ledgerRows(st),
                     st.caseRow().ledgerVersion(), op.opened().date(), true);
@@ -1007,12 +1008,23 @@ public class TurnService {
                 toolSteps.add(toolStep(ctx.caseId, A6_STOP_NAME, in, Map.of("stopped", stop)));
                 break;
             }
+            boolean ran = false;
             for (AnswerOutput.ToolRequest q : reqs) {
                 if (used >= max) {
                     break;
                 }
+                ran = true;
                 used++;
                 toolSteps.add(runTool(ctx.caseId, tools, op, q, round, used, max, results, found, c.r().callIds()));
+            }
+            if (ran) {
+                for (AnswerOutput.GapOut g : c.r().value().gaps()) {
+                    SpecificAnswerStep.Interp p = new SpecificAnswerStep.Interp(g.flow(), g.issue());
+                    if (AnswerOutput.INTERPRETATION.equals(g.kind()) && g.issue() != null && !g.issue().isBlank()
+                            && !prior.contains(p)) {
+                        prior.add(p);
+                    }
+                }
             }
         }
         return new Rounds(c, List.copyOf(calls), List.copyOf(callIds), List.copyOf(toolSteps));

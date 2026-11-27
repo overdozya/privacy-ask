@@ -138,6 +138,39 @@ class A6FlowTest {
                 .isEqualTo("개인정보 처리 위탁 문서 기재");
     }
 
+    /**
+     * S10b: A6 뒤 해석 필요 gap을 A6 절 인용 없이 빼면 업무 검사가 거절하고 이유를 붙여 1회 다시 부른다. 다시 시도에서도 그러면 LLM_FAILED가
+     * 아니라 그 gap을 남긴 것으로 보고(코드가 되살림) 이관 사유를 유지한다.
+     */
+    @Test
+    void droppedGapWithoutA6CiteKeepsReason() throws Exception {
+        List<String> retries = new ArrayList<>();
+        FlowApiTest.routes.put("A5_answer", r -> {
+            if (results(input(r)) <= 0) {
+                return FakeProvider.ok(askTool(r));
+            }
+            if (r.user().contains("[다시 요청]")) {
+                retries.add(r.user().substring(r.user().indexOf("[다시 요청]")));
+            }
+            return FakeProvider.ok(FlowApiTest.answerFromInput(r, true));   // gap을 빼고 A6 절은 인용하지 않음(두 번 다)
+        });
+        FlowApiTest.Res r = runLow();
+        assertThat(r.status()).as(String.valueOf(r.body())).isEqualTo(200);
+        String id = r.body().get("case_id").asString();
+        assertThat(FlowApiTest.outcomes(id, "A5_answer")).containsExactly("OK", "CHECK_FAIL", "OK");
+        assertThat(retries).hasSize(1);
+        assertThat(retries.get(0)).contains("tools.results 절 인용이 없음");
+        assertThat(FlowApiTest.jdbc.sql("SELECT status FROM steps WHERE case_id=? AND step='A5'").param(id)
+                .query(String.class).list()).containsExactly("RETRY_OK");
+        JsonNode res = r.body().get("result");
+        assertThat(res.get("exit_reasons").toString()).contains("GAP_INTERPRETATION");
+        assertThat(res.get("exit_type").asString()).isEqualTo("TRANSFER");
+        JsonNode gap = res.get("answer").get("gaps").get(0);
+        assertThat(gap.get("kind").asString()).isEqualTo("INTERPRETATION");
+        assertThat(gap.get("handled").asString()).isEqualTo("REASON");
+        assertThat(gap.get("note").asString()).contains("코드가 남김");
+    }
+
     /** 사안당 2회 상한: 모델이 계속 요청해도 도구는 2번, 세 번째 요청은 '도구 멈춤' 기록, 마지막 답의 gap → 이관 사유. */
     @Test
     void twoCallLimit() throws Exception {

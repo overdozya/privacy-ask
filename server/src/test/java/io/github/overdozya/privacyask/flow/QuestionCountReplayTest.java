@@ -69,7 +69,8 @@ class QuestionCountReplayTest {
                     "--spring.datasource.url=" + LoadedDb.url(LoadedDb.container().getDatabaseName()),
                     "--spring.datasource.username=" + LoadedDb.container().getUsername(),
                     "--spring.datasource.password=" + LoadedDb.container().getPassword(),
-                    "--app.llm.provider=fake", "--app.data-dir=" + LoadedDb.DATA, "--logging.level.root=warn"));
+                    "--app.llm.provider=fake", "--app.data-dir=" + LoadedDb.DATA, "--logging.level.root=warn",
+                    "--app.tools.reduce-input=false"));   // S10b: 손 출력은 안내서 절 글을 다 받은 판 기준
             args.addAll(List.of(v.getValue()));
             Map<String, Object> rows = new LinkedHashMap<>();
             try (ConfigurableApplicationContext ctx = new SpringApplicationBuilder(PrivacyAskApplication.class)

@@ -106,12 +106,60 @@ public class SpecificAnswerStep {
      * found = 도구가 글을 붙인 절(키 = 절 ID → 원문 단위. 인용해도 되고, 꾸러미 밖이면 출처 A6·'해석 참고').
      */
     public record ToolView(boolean enabled, int remaining, boolean reduce, List<Map<String, Object>> results,
-                           Map<String, PackageOpener.Source> found) {
-        public static final ToolView NONE = new ToolView(false, 0, false, List.of(), Map.of());
+                           Map<String, PackageOpener.Source> found, List<Interp> priorInterp) {
+        public static final ToolView NONE = new ToolView(false, 0, false, List.of(), Map.of(), List.of());
+
+        public ToolView(boolean enabled, int remaining, boolean reduce, List<Map<String, Object>> results,
+                        Map<String, PackageOpener.Source> found) {
+            this(enabled, remaining, reduce, results, found, List.of());
+        }
     }
 
-    /** 호출 한 번(저장 전). in = 보낸 입력, chars = 입력 JSON 글자 수. */
-    public record Call(Map<String, Object> in, LlmResult<AnswerOutput> r, int chars, ToolView view) {}
+    /** S10b: 도구를 부른 앞 라운드가 낸 해석 필요 gap(쟁점이 있는 것만). flow null = 흐름을 안 적음. */
+    public record Interp(Integer flow, String issue) {}
+
+    /**
+     * 호출 한 번(저장 전). in = 보낸 입력, chars = 입력 JSON 글자 수. restored = A6 뒤 A6 절 인용 없이 뺐다가 다시 시도에서도 고치지 않아
+     * 코드가 되살린 해석 필요 gap(S10b).
+     */
+    public record Call(Map<String, Object> in, LlmResult<AnswerOutput> r, int chars, ToolView view, List<Interp> restored) {
+        public Call(Map<String, Object> in, LlmResult<AnswerOutput> r, int chars, ToolView view) {
+            this(in, r, chars, view, List.of());
+        }
+    }
+
+    static final String RESTORED_NOTE = "A6 결과를 인용하지 않고 뺀 해석 필요(코드가 남김)";
+
+    /**
+     * S10b(메인 결정): 앞 라운드의 해석 필요 gap을 이번 답이 뺐는데, 그 쟁점 인용에 A6이 붙인 절(found)이 하나도 없으면 그 gap.
+     * 근거 없는 '풀림'을 막는다.
+     */
+    static List<Interp> unsupportedDrops(ToolView tv, AnswerOutput out) {
+        List<Interp> bad = new ArrayList<>();
+        for (Interp p : tv.priorInterp()) {
+            boolean still = out.gaps().stream().anyMatch(g -> AnswerOutput.INTERPRETATION.equals(g.kind())
+                    && p.issue().equals(g.issue()) && (p.flow() == null || g.flow() == null || p.flow().equals(g.flow())));
+            if (still) {
+                continue;
+            }
+            boolean cited = out.issues().stream().filter(i -> i.issue().equals(p.issue())
+                    && (p.flow() == null || p.flow() == i.flow()))
+                    .anyMatch(i -> i.cites().stream().anyMatch(tv.found()::containsKey));
+            if (!cited) {
+                bad.add(p);
+            }
+        }
+        return bad;
+    }
+
+    /** 되살린 gap을 출력에 더한다. */
+    static AnswerOutput withRestored(AnswerOutput out, List<Interp> restored) {
+        List<AnswerOutput.GapOut> gaps = new ArrayList<>(out.gaps());
+        for (Interp p : restored) {
+            gaps.add(new AnswerOutput.GapOut(AnswerOutput.INTERPRETATION, p.flow(), p.issue(), List.of(), RESTORED_NOTE));
+        }
+        return new AnswerOutput(out.issues(), gaps, out.toolRequests());
+    }
 
     /** A5 호출만(저장하지 않음). 도구 라운드는 흐름(pa/flow)이 돌리고, 끝에 save로 A6 단계들과 함께 한 번에 쓴다. */
     public Call call(CaseState st, List<FlowIn> flows, PackageOpener.Opened opened, PackageOpener.RefDate ref,
@@ -127,13 +175,38 @@ public class SpecificAnswerStep {
         Set<String> rows = ledgerRowIds(st);
         Set<String> keys = allowedKeys(opened, tv);
         Set<String> omitted = omitted(opened, tv);
+        // S10b: A6 뒤 해석 필요 gap을 A6 절 인용 없이 빼면 첫 시도만 거절(이유를 붙여 1회 다시). 다시 시도에서도 그러면 받고 그 gap을 남긴다
+        int[] attempt = {0};
+        List<Interp> restored = new ArrayList<>();
         LlmResult<AnswerOutput> r = llm.call(PROMPT, in, AnswerOutput.class,
                 out -> {
+                    int n = attempt[0]++;
+                    restored.clear();
                     String bad = check(k, known(st), flows, keys, rows, out, tv, omitted);
-                    return bad != null || extra == null ? bad : extra.apply(out);
+                    if (bad == null && extra != null) {
+                        bad = extra.apply(out);
+                    }
+                    if (bad != null) {
+                        return bad;
+                    }
+                    List<Interp> drop = unsupportedDrops(tv, out);
+                    if (drop.isEmpty()) {
+                        return null;
+                    }
+                    if (n == 0) {
+                        return "A6 뒤 해석 필요 gap을 뺐는데 그 쟁점에 tools.results 절 인용이 없음: "
+                                + drop.stream().map(p -> (p.flow() == null ? "" : p.flow() + "|") + p.issue()).toList()
+                                + "(찾은 절로 풀었으면 그 절을 인용하고, 아니면 gap을 남긴다)";
+                    }
+                    restored.addAll(drop);
+                    return null;
                 },
                 new CallContext(st.caseRow().caseId(), null, deadline, discarded));
-        return new Call(in, r, json.writeValueAsString(in).length(), tv);
+        if (r.ok() && !restored.isEmpty()) {
+            r = new LlmResult<>(withRestored(r.value(), restored), r.raw(), r.status(), r.attempts(), r.provider(),
+                    r.model(), r.temperature(), r.promptId(), r.promptVersion(), r.callIds(), r.lastError());
+        }
+        return new Call(in, r, json.writeValueAsString(in).length(), tv, List.copyOf(restored));
     }
 
     /** 저장하지 않고 답만 짓는다(견주기용). 실패한 호출이면 null. */
