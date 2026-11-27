@@ -1008,8 +1008,12 @@ public class TurnService {
         CitationVerifier.Report rep = cv.verify(citationBasis(ctx, st, a, op), CitationVerifier.issues(a));
         List<PreliminaryExit.Reason> external = externalReasons(ctx, st);
         CaseJudge.Judgment j = judges.judge(st, external);
-        List<String> unasked = questions.next(st, facts.cloudItFlows(ctx.caseId), lawReasons(ctx, st)).openKeys();
-        return new Verdict(j, a, rep, ea.specific(j, a, rep), unasked, op);
+        QuestionSelector.Selection sel = questions.next(st, facts.cloudItFlows(ctx.caseId), lawReasons(ctx, st));
+        // S9b: A2가 지금도 사안 등급·출구를 바꿀 수 있다고 보는 사실(Impact.EXIT). OPEN 슬롯이 이것에 막혔을 때만 OPEN_UNKNOWN
+        Set<String> exitFacts = new LinkedHashSet<>();
+        sel.worth().stream().filter(x -> x.impact() == QuestionSelector.Impact.EXIT).forEach(x ->
+                exitFacts.add((x.flowNo() == null ? ExitAssembler.COMMON : String.valueOf(x.flowNo())) + ":" + x.factId()));
+        return new Verdict(j, a, rep, ea.specific(j, a, rep, exitFacts), sel.openKeys(), op);
     }
 
     /** A7(코드): 인용 검증 → 최종 출구 → 이관이면 검토 요청 묶음. 단계 output에 출구·검증·묶음(요지 전). */
@@ -1175,7 +1179,8 @@ public class TurnService {
         boolean watch = flags != null && flags.path("omission_watch").asBoolean(false);
         return new TurnResult.Result(false, s.caseGrade(), s.exitType(), List.copyOf(reasons), watch, List.copyOf(flows),
                 flags == null ? List.of() : strings(flags.path("unasked")), a, s.judgmentId(), s.conclusive(), summary,
-                flags == null ? null : flags.get("verify"));
+                flags == null ? null : flags.get("verify"), flags == null ? null : flags.get("policy"),
+                flags == null ? List.of() : strings(flags.path("unasked_no_effect")));
     }
 
     <T> T stepOutput(String caseId, int seq, Class<T> type) {

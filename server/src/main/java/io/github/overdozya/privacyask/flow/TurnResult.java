@@ -31,14 +31,17 @@ public record TurnResult(String caseId, String state, String outcome, Intake int
      * 그러면 exitType은 TRANSFER. 일반 문의(GENERAL)는 caseGrade·flows가 비고 answer만 있다.
      * S9 최종 결과(A7·A8 뒤, 판정 테이블에서 읽음): preliminary false, exitType·exitReasons = A7 최종 출구(ExitAssembler 사유 코드),
      * judgmentId = case_judgments 행, conclusive = 사안 결론 확정, summary = 이관이면 검토자 요지(A7_summary), verify = 인용 검증 요약.
+     * S9b: policy = 출구 정책 표시 {grade, exit}(사유가 아님), unaskedNoEffect = 묻지 않은 사실(결과에 영향 없음, "흐름:사실 (슬롯)").
      */
     public record Result(boolean preliminary, String caseGrade, String exitType, List<Reason> exitReasons,
                          boolean watchFlag, List<FlowResult> flows, List<String> unasked, Answer answer,
-                         Long judgmentId, Boolean conclusive, List<String> summary, Object verify) {
+                         Long judgmentId, Boolean conclusive, List<String> summary, Object verify, Object policy,
+                         List<String> unaskedNoEffect) {
 
         public Result(boolean preliminary, String caseGrade, String exitType, List<Reason> exitReasons,
                       boolean watchFlag, List<FlowResult> flows, List<String> unasked, Answer answer) {
-            this(preliminary, caseGrade, exitType, exitReasons, watchFlag, flows, unasked, answer, null, null, null, null);
+            this(preliminary, caseGrade, exitType, exitReasons, watchFlag, flows, unasked, answer, null, null, null, null, null,
+                    null);
         }
 
         /** 예비 결과에 답을 붙인다: 답의 이관 사유를 더하고, 사유가 생기면 TRANSFER. */

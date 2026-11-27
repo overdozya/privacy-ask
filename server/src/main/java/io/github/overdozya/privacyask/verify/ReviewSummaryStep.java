@@ -56,7 +56,8 @@ public class ReviewSummaryStep {
     public Result run(CaseState st, Map<String, Object> bundle, int bundleStep, Instant deadline) {
         Map<String, Object> in = input(bundle);
         String caseId = st.caseRow().caseId();
-        LlmResult<SummaryOut> r = llm.call(PROMPT, in, SummaryOut.class, ReviewSummaryStep::check,
+        boolean policyOnly = reasons(in).isEmpty();
+        LlmResult<SummaryOut> r = llm.call(PROMPT, in, SummaryOut.class, out -> check(out, policyOnly),
                 new CallContext(caseId, null, deadline, false));
         int chars = in.toString().length();
         LocalDateTime at = clock.nowUtc();
@@ -75,16 +76,28 @@ public class ReviewSummaryStep {
         });
     }
 
-    /** 통과면 null. */
+    @SuppressWarnings("unchecked")
+    static List<Object> reasons(Map<String, Object> in) {
+        return (List<Object>) in.getOrDefault("exit_reasons", List.of());
+    }
+
     static String check(SummaryOut out) {
+        return check(out, false);
+    }
+
+    /** 통과면 null. policyOnly(사유 없이 등급 정책만으로 이관, S9b)면 요지 한 줄에 '정책'이 드러나야 한다. */
+    static String check(SummaryOut out, boolean policyOnly) {
         List<String> bad = new ArrayList<>();
+        if (policyOnly && out.summary() != null && out.summary().stream().noneMatch(x -> x != null && x.contains("정책"))) {
+            bad.add("사유 없이 등급 정책(policy)만으로 이관인데 요지에 '등급 정책에 따른 이관'이 없음");
+        }
         if (out.summary() == null || out.summary().isEmpty()) {
             bad.add("요지 없음");
         } else {
             for (String s : out.summary()) {
                 if (s == null || s.isBlank()) {
                     bad.add("빈 줄");
-                } else if (s.matches(".*\\b[A-Z]+(_[A-Z]+)+\\b.*")) {
+                } else if (s.matches(".*[A-Z]{2,}_[A-Z]{2,}.*")) {
                     bad.add("사유 코드를 글자 그대로 씀: " + s.substring(0, Math.min(40, s.length())));
                 }
             }
@@ -108,6 +121,10 @@ public class ReviewSummaryStep {
             reasons.add(m);
         }
         in.put("exit_reasons", reasons);
+        in.put("policy", b.get("policy"));
+        if (b.get("unasked_no_effect") instanceof List<?> ne && !ne.isEmpty()) {
+            in.put("unasked_no_effect", ne);
+        }
         List<Map<String, Object>> flows = new ArrayList<>();
         for (Map<String, Object> f : (List<Map<String, Object>>) b.getOrDefault("flows", List.of())) {
             Map<String, Object> m = new LinkedHashMap<>();

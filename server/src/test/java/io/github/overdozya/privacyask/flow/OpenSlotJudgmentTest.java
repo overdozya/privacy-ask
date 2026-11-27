@@ -97,7 +97,9 @@ class OpenSlotJudgmentTest {
         assertThat(r.get("outcome").asString()).isEqualTo("RESULT");
         JsonNode res = r.get("result");
         System.out.println("S9 OPEN 사안 사유: " + res.get("exit_reasons") + " unasked " + res.get("unasked"));
-        assertThat(res.get("exit_reasons").toString()).contains("OPEN_UNKNOWN");
+        // S9b: 남은 OPEN은 A2 멈춤 규칙상 등급·출구를 못 바꿈 → 사유 아님, '묻지 않은 사실(결과에 영향 없음)'
+        assertThat(res.get("exit_reasons").toString()).doesNotContain("OPEN_UNKNOWN");
+        assertThat(res.get("unasked_no_effect")).isNotEmpty();
         assertThat(r.get("state").asString()).isEqualTo("TRANSFERRED");
         long jid = res.get("judgment_id").asLong();
         JsonNode flags = FlowApiTest.JSON.readTree(jdbc.sql("SELECT flags FROM case_judgments WHERE judgment_id=?")
@@ -108,6 +110,7 @@ class OpenSlotJudgmentTest {
                     + "AND flow_no=? AND slot_key=?").params(jid, o.get("flow").asInt(), o.get("slot").asString()).query()
                     .singleRow();
             assertThat(row.get("status")).isEqualTo("UNKNOWN");
+            assertThat(o.get("affects_exit").asBoolean()).isFalse();
             List<String> unknown = io.github.overdozya.privacyask.rules.Condition.strings(
                     FlowApiTest.JSON.readTree(String.valueOf(row.get("unknown_facts"))));
             o.get("blocking").forEach(b -> assertThat(unknown).contains(b.asString()));
@@ -117,6 +120,7 @@ class OpenSlotJudgmentTest {
         // 묶음의 남은 질문에 막은 사실이 들어감
         JsonNode bundle = FlowApiTest.JSON.readTree(jdbc.sql("SELECT review_bundle FROM case_judgments WHERE judgment_id=?")
                 .param(jid).query(String.class).single());
-        assertThat(bundle.get("remaining_questions").toString()).contains("OPEN_SLOT");
+        assertThat(bundle.get("remaining_questions").toString()).contains("결과에 영향 없음");
+        assertThat(bundle.get("unasked_no_effect")).isNotEmpty();
     }
 }

@@ -188,7 +188,18 @@ public final class JudgmentRecorder {
         flags.put("fact_conflict", factConflict);
         flags.put("check_items", checkItems);
         flags.put("omission_watch", in.exit().reasons().stream().anyMatch(r -> PreliminaryExit.WATCH_FLAG.equals(r.code())));
+        // S9b: OPEN 슬롯마다 등급·출구를 바꿀 수 있는 막은 사실(A2 IMPACT EXIT)이 있었나
+        for (Map<String, Object> o : openSlots) {
+            in.exit().openSlots().stream().filter(x -> x.flow() == (int) o.get("flow") && x.slot().equals(o.get("slot")))
+                    .findFirst().ifPresent(x -> {
+                        o.put("affects_exit", x.affectsExit());
+                        o.put("exit_facts", x.exitFacts());
+                    });
+        }
         flags.put("open_slots", openSlots);
+        flags.put("policy", in.exit().policy());
+        flags.put("policy_only", in.exit().policyOnly());
+        flags.put("unasked_no_effect", ReviewBundleBuilder.noEffect(in.exit()));
         flags.put("reasons", in.exit().reasons());
         flags.put("flows", flowFlags);
         flags.put("unasked", in.unasked());

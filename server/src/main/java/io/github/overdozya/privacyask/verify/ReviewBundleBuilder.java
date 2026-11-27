@@ -43,6 +43,9 @@ public final class ReviewBundleBuilder {
         b.put("open_date", in.openDate());
         b.put("case_grade", in.exit().caseGrade());
         b.put("exit_reasons", in.exit().reasons());
+        b.put("policy", in.exit().policy());   // S9b: 출구 정책은 사유가 아닌 표시
+        b.put("policy_only", in.exit().policyOnly());
+        b.put("unasked_no_effect", noEffect(in.exit()));
         b.put("facts", facts(st));
         b.put("flows", flows(st, in));
         b.put("remaining_questions", remaining(st, in));
@@ -182,10 +185,23 @@ public final class ReviewBundleBuilder {
         }
         for (ExitAssembler.OpenSlot o : in.exit().openSlots()) {
             for (String f : o.blocking()) {
-                put(out, o.flow(), f, "OPEN_SLOT " + o.slot());
+                put(out, o.flow(), f, "OPEN_SLOT " + o.slot() + (o.exitFacts().contains(f) ? "" : " (결과에 영향 없음)"));
             }
         }
         return List.copyOf(out.values());
+    }
+
+    /** 묻지 않은 사실(결과에 영향 없음): 등급·출구를 못 바꾸는 OPEN 슬롯의 막은 사실("흐름:사실 (슬롯)"). */
+    public static List<String> noEffect(ExitAssembler.FinalExit e) {
+        List<String> out = new ArrayList<>();
+        for (ExitAssembler.OpenSlot o : e.openSlots()) {
+            for (String f : o.blocking()) {
+                if (!o.exitFacts().contains(f)) {
+                    out.add(o.flow() + ":" + f + " (" + o.slot() + ")");
+                }
+            }
+        }
+        return out;
     }
 
     private void put(Map<String, Map<String, Object>> out, Integer flow, String fact, String why) {

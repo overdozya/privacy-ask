@@ -110,7 +110,7 @@ class FlowApiTest {
         routes.put("A7_summary", r -> FakeProvider.ok(SUMMARY));
     }
 
-    static final String SUMMARY = "{\"summary\":[\"손으로 쓴 요지 첫 줄\",\"손으로 쓴 요지 둘째 줄\"]}";
+    static final String SUMMARY = "{\"summary\":[\"손으로 쓴 요지 첫 줄\",\"손으로 쓴 요지 둘째 줄(등급 정책)\"]}";
 
     /** S8 A5 손 출력: 넘긴 흐름·쟁점마다 첫 원문 키를 인용하고, 그 흐름 원장 대조의 첫 행을 단다(conclusive는 인자). 받은 입력대로 짓는다. */
     static String answerFromInput(ProviderRequest r, boolean conclusive) {
@@ -371,11 +371,14 @@ class FlowApiTest {
         JsonNode j = ExampleCaseDb.judgment();
         assertThat(res.get("case_grade").asString()).isEqualTo(j.get("case_grade").asString()).isEqualTo("H");
         assertThat(res.get("exit_type").asString()).isEqualTo(j.get("exit_type").asString()).isEqualTo("TRANSFER");
-        // S9 최종 사유: 예비 사유(현업 미확인) + 출구 정책(H → TRANSFER). 쟁점이 모두 확정이라 NOT_CONCLUSIVE 없음
+        // S9 최종 사유: 예비 사유(현업 미확인). 쟁점이 모두 확정이라 NOT_CONCLUSIVE 없음. S9b: 출구 정책은 사유가 아닌 표시
         assertThat(res.get("exit_reasons").toString()).isEqualTo("[{\"code\":\"REQUESTER_UNKNOWN\",\"flow\":1,"
-                + "\"detail\":\"cross_border: F-C2\"},{\"code\":\"GRADE_POLICY\",\"flow\":null,\"detail\":\"exit_policy[H] = TRANSFER\"}]");
+                + "\"detail\":\"cross_border: F-C2\"}]");
+        assertThat(res.get("policy").get("grade").asString()).isEqualTo("H");
+        assertThat(res.get("policy").get("exit").asString()).isEqualTo("TRANSFER");
+        assertThat(res.get("unasked_no_effect")).isEmpty();
         assertThat(res.get("conclusive").asBoolean()).isFalse();   // 재현표 conclusive 0(흐름 1 cross_border 미확인)
-        assertThat(Condition.strings(res.get("summary"))).containsExactly("손으로 쓴 요지 첫 줄", "손으로 쓴 요지 둘째 줄");
+        assertThat(Condition.strings(res.get("summary"))).containsExactly("손으로 쓴 요지 첫 줄", "손으로 쓴 요지 둘째 줄(등급 정책)");
         assertThat(res.get("verify").get("problems")).isEmpty();
         assertJudgmentMatchesReplay(id, res.get("judgment_id").asLong());
         assertThat(res.get("watch_flag").asBoolean()).isFalse();
@@ -1133,5 +1136,35 @@ class FlowApiTest {
         assertThat(f2.body().get("details").get("error").asString()).contains("A7 데이터 검사");
         assertThat(jdbc.sql("SELECT COUNT(*) FROM steps WHERE case_id=? AND name=?").params(id2, NextAction.A4_REOPEN_NAME)
                 .query(Long.class).single()).isEqualTo(1L);
+    }
+
+    // ───────── S9b 정책만으로 이관 ─────────
+
+    /** 예시 사안인데 흐름 1 서버가 국내(F-C2 '아니오')·쟁점 모두 확정 → 사유 없음, 등급 H 정책만으로 이관. 요지에 '등급 정책'이 있어야 함. */
+    @Test
+    void policyOnlyTransferSummarySaysPolicy() throws Exception {
+        routes.put("A5_answer", r -> FakeProvider.ok(answerFromInput(r, true)));
+        routes.put("A7_summary", r -> FakeProvider.ok(r.user().contains("[다시 요청]")
+                ? "{\"summary\":[\"제휴 카페 제공은 목적 외 이용(고) 쟁점입니다.\",\"이관 사유는 없고 등급 정책에 따른 이관입니다.\"]}"
+                : "{\"summary\":[\"제휴 카페 제공은 목적 외 이용(고) 쟁점입니다.\"]}"));
+        Res r = create();
+        String id = r.body().get("case_id").asString();
+        for (int i = 0; i < 10 && "QUESTION".equals(r.body().get("outcome").asString()); i++) {
+            JsonNode q = r.body().get("question");
+            String pick = "1:F-C2".equals(key(q)) ? "아니오" : EXAMPLE_ANSWERS.get(key(q));
+            r = post("/api/cases/" + id + "/answers", answer(q.get("turn_no").asInt(), pick));
+        }
+        assertThat(r.status()).as(String.valueOf(r.body())).isEqualTo(200);
+        JsonNode res = r.body().get("result");
+        assertThat(res.get("exit_reasons")).isEmpty();
+        assertThat(res.get("exit_type").asString()).isEqualTo("TRANSFER");
+        assertThat(res.get("policy").get("exit").asString()).isEqualTo("TRANSFER");
+        assertThat(outcomes(id, "A7_summary")).containsExactly("CHECK_FAIL", "OK");
+        assertThat(String.join(" ", Condition.strings(res.get("summary")))).contains("등급 정책에 따른 이관");
+        JsonNode flags = JSON.readTree(jdbc.sql("SELECT flags FROM case_judgments WHERE case_id=?").param(id)
+                .query(String.class).single());
+        assertThat(flags.get("policy_only").asBoolean()).isTrue();
+        assertThat(JSON.readTree(jdbc.sql("SELECT exit_reasons FROM case_judgments WHERE case_id=?").param(id)
+                .query(String.class).single())).isEmpty();
     }
 }

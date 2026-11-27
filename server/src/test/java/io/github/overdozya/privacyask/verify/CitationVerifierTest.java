@@ -179,7 +179,9 @@ class CitationVerifierTest {
                 cv.verify(basis(CitationVerifier.sources(opened), a4Hashes(), D), goodCites()));
         assertThat(e.exitType()).isEqualTo("TRANSFER");
         assertThat(e.reasons()).extracting(ExitAssembler.Reason::code).containsExactly("REQUESTER_UNKNOWN",
-                "NOT_CONCLUSIVE", "NOT_CONCLUSIVE", "NOT_CONCLUSIVE", "NOT_CONCLUSIVE", "NOT_CONCLUSIVE", "GRADE_POLICY");
+                "NOT_CONCLUSIVE", "NOT_CONCLUSIVE", "NOT_CONCLUSIVE", "NOT_CONCLUSIVE", "NOT_CONCLUSIVE");
+        assertThat(e.policy()).isEqualTo(new ExitAssembler.Policy("H", "TRANSFER"));   // S9b: 정책은 사유가 아닌 표시
+        assertThat(e.policyOnly()).isFalse();
         assertThat(e.conclusive()).isFalse();
     }
 
@@ -201,20 +203,66 @@ class CitationVerifierTest {
         assertThat(e.conclusive()).isTrue();
     }
 
-    @Test
-    void openSlotCountsAsUnknown() {
+    /** L 흐름 1개(수집·이용 근거 L, 모르는 슬롯 없음)에 processing_mode만 OPEN(F-M2가 막음). */
+    static CaseJudge.Judgment lowWithOpen() {
         IssueDeriver.FlowIssues f1 = example.flow(1);
-        Map<String, SlotResult> slots = new LinkedHashMap<>(f1.slots());
-        slots.put("processing_mode", new SlotResult(SlotResult.OPEN, List.of(), List.of(), List.of(), List.of("F-M2"),
-                List.of(), List.of()));
-        IssueDeriver.FlowIssues open = new IssueDeriver.FlowIssues(1, slots, f1.issues(), f1.firedRules(), f1.grade());
-        CaseJudge.Judgment j = new CaseJudge.Judgment(List.of(open), f1.grade(), example.exit());
-        ExitAssembler.FinalExit e = assembler().specific(j, answer(true, List.of()), null);
-        assertThat(e.openSlots()).singleElement().satisfies(o -> assertThat(o.blocking()).containsExactly("F-M2"));
-        assertThat(e.reasons()).extracting(ExitAssembler.Reason::code).contains(ExitAssembler.OPEN_UNKNOWN);
+        Map<String, SlotResult> slots = new LinkedHashMap<>();
+        f1.slots().forEach((k, v) -> slots.put(k, switch (k) {
+            case "cross_border" -> new SlotResult(SlotResult.CONFIRMED, List.of("없음"), v.basisFacts(), List.of(), List.of(),
+                    List.of(), List.of());
+            case "processing_mode" -> new SlotResult(SlotResult.OPEN, List.of(), List.of(), List.of(), List.of("F-M2"),
+                    List.of(), List.of());
+            default -> v;
+        }));
+        IssueDeriver.FlowIssues low = new IssueDeriver.FlowIssues(1, slots,
+                f1.issues().stream().filter(i -> "L".equals(i.grade())).toList(), List.of(), "L");
+        return new CaseJudge.Judgment(List.of(low), "L", new PreliminaryExit.Exit("ANSWER", "L", List.of()));
+    }
+
+    static Answer lowAnswer() {
+        return new Answer(Answer.SPECIFIC, null, null, "2026-12-01", false, true, List.of(), List.of(), null, null, null,
+                List.of(), List.of(), null, List.of(), null, null);
+    }
+
+    /** S9b ①: L 사안에 등급·출구를 못 바꾸는 OPEN만 남음 → 사유 없음 → ANSWER, '결과에 영향 없음'으로만. */
+    @Test
+    void lowCaseHarmlessOpenStillAnswer() {
+        ExitAssembler.FinalExit e = assembler().specific(lowWithOpen(), lowAnswer(), null, Set.of("1:F-C2"));
+        assertThat(e.exitType()).isEqualTo("ANSWER");
+        assertThat(e.reasons()).isEmpty();
+        assertThat(e.openSlots()).singleElement().satisfies(o -> {
+            assertThat(o.blocking()).containsExactly("F-M2");
+            assertThat(o.affectsExit()).isFalse();
+        });
+        assertThat(ReviewBundleBuilder.noEffect(e)).containsExactly("1:F-M2 (processing_mode)");
+        assertThat(e.policy()).isEqualTo(new ExitAssembler.Policy("L", "ANSWER"));
+    }
+
+    /** S9b ②: 같은 L 사안인데 막은 사실을 A2가 등급·출구를 바꿀 수 있다고 봄(시간 한도·LLM 실패로 못 물은 경우) → TRANSFER + OPEN_UNKNOWN. */
+    @Test
+    void lowCaseExitChangingOpenTransfers() {
+        ExitAssembler.FinalExit e = assembler().specific(lowWithOpen(), lowAnswer(), null, Set.of("1:F-M2"));
         assertThat(e.exitType()).isEqualTo("TRANSFER");
-        Set<String> codes = new LinkedHashSet<>();
-        e.reasons().forEach(x -> codes.add(x.code()));
-        System.out.println("S9 OPEN 슬롯 출구 사유: " + codes);
+        assertThat(e.reasons()).extracting(ExitAssembler.Reason::code).containsExactly(ExitAssembler.OPEN_UNKNOWN);
+        assertThat(e.reasons().get(0).detail()).isEqualTo("processing_mode: F-M2");
+        assertThat(e.conclusive()).isFalse();
+        // 공통 사실 키로도 맞는다
+        assertThat(assembler().specific(lowWithOpen(), lowAnswer(), null, Set.of("공통:F-M2")).exitType()).isEqualTo("TRANSFER");
+    }
+
+    /** S9b ③: 사유가 없고 정책만 이관(H) → TRANSFER, policyOnly. */
+    @Test
+    void policyOnlyTransfer() {
+        IssueDeriver.FlowIssues f2 = example.flow(2);
+        CaseJudge.Judgment j = new CaseJudge.Judgment(List.of(f2), "H", new PreliminaryExit.Exit("TRANSFER", "H", List.of()));
+        Answer a = new Answer(Answer.SPECIFIC, null, null, "2026-12-01", false, true, List.of(), List.of(), null, null, null,
+                List.of(), List.of(), null, List.of(), null, null);
+        ExitAssembler.FinalExit e = assembler().specific(j, a, null, Set.of());
+        assertThat(e.reasons()).isEmpty();
+        assertThat(e.exitType()).isEqualTo("TRANSFER");
+        assertThat(e.policyOnly()).isTrue();
+        assertThat(ReviewSummaryStep.check(new ReviewSummaryStep.SummaryOut(List.of("제휴 카페 제공 사안")), true))
+                .contains("등급 정책");
+        assertThat(ReviewSummaryStep.check(new ReviewSummaryStep.SummaryOut(List.of("등급 정책에 따른 이관입니다")), true)).isNull();
     }
 }
