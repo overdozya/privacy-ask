@@ -43,4 +43,31 @@ class PromptCatalogTest {
         assertThat(v.check(p, "{}").error()).startsWith("스키마 위반");
         assertThat(v.check(p, " ").error()).isEqualTo("빈 출력");
     }
+
+    @Test
+    void sendsSimplifiedSchemaButValidatesStrict() {
+        Prompt p = PromptCatalog.load("classpath:prompts-test", json).get("T_echo");
+        // 보낼 스키마: 숫자 범위를 뺀다(Gemini 'too many states' 400). 칸 이름·enum·required는 그대로
+        assertThat(p.schema().path("properties").path("count").has("minimum")).isFalse();
+        assertThat(p.schema().path("properties").path("echo").path("enum")).hasSize(3);
+        assertThat(p.strictSchema().path("properties").path("count").path("minimum").asInt()).isZero();
+        // 검증은 엄격한 쪽
+        OutputValidator v = new OutputValidator(json);
+        assertThat(v.check(p, "{\"echo\":\"a\",\"count\":-1}").error()).startsWith("스키마 위반");
+        assertThat(v.check(p, "{\"echo\":\"a\",\"count\":2}").ok()).isTrue();
+    }
+
+    @Test
+    void sendableKeepsPropertiesNamedLikeKeywords() {
+        var node = json.readTree("""
+                {"type":"object","properties":{"minimum":{"type":"integer","maximum":3},
+                 "list":{"type":"array","maxItems":2,"items":{"type":"string","maxLength":5}}},"$defs":{"pattern":{"type":"string"}}}""");
+        var s = PromptCatalog.sendable(node);
+        assertThat(s.path("properties").has("minimum")).isTrue();
+        assertThat(s.path("properties").path("minimum").has("maximum")).isFalse();
+        assertThat(s.path("properties").path("list").has("maxItems")).isFalse();
+        assertThat(s.path("properties").path("list").path("items").has("maxLength")).isFalse();
+        assertThat(s.path("$defs").has("pattern")).isTrue();
+        assertThat(node.path("properties").path("list").has("maxItems")).as("원본은 그대로").isTrue();
+    }
 }

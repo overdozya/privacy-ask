@@ -26,7 +26,7 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * 기동 때 prompts/를 한 번 읽는다(06 4.5·6.2). 파일 쌍: ID.md + ID.schema.json, 공통은 _common.md.
  * 머리 첫 줄: <!-- version: 1; max_output_tokens: 512; thinking: default -->
- * 해시는 공통 + 개별 + 스키마 파일 글 전체(머리 포함). 버전만 보면 사람이 고친 판, 해시까지 보면 실제 보낸 글·생성 설정.
+ * 스키마 파일은 검증용(엄격), 공급자에게는 sendable()로 줄인 판을 보낸다. 해시는 공통 + 개별 + 스키마 파일 글 전체(머리 포함). 버전만 보면 사람이 고친 판, 해시까지 보면 실제 보낸 글·생성 설정.
  */
 public final class PromptCatalog {
     public static final Pattern HEADER = Pattern.compile(
@@ -69,10 +69,9 @@ public final class PromptCatalog {
                 }
                 String body = raw.substring(h.end()).strip();
                 String schemaRaw = read(schemaRes);
-                JsonNode schemaNode = json.readTree(schemaRaw);
-                if (schemaNode instanceof tools.jackson.databind.node.ObjectNode o) {
-                    o.remove("$schema"); // 공급자에게 보내는 쪽에는 방언 표시를 빼고, 검증은 2020-12로 한다
-                }
+                // 파일 = 검증할 스키마(엄격: 길이·개수·범위 포함). 보낼 스키마 = 그것에서 방언 표시와 SEND_DROP을 뺀 단순판
+                JsonNode strictNode = json.readTree(schemaRaw);
+                JsonNode schemaNode = sendable(strictNode);
                 Schema compiled = registry.getSchema(schemaRaw, InputFormat.JSON);
                 String sha8 = sha256(commonRaw + "\u0000" + raw + "\u0000" + schemaRaw).substring(0, 8);
                 String version = h.group(1);
@@ -80,12 +79,41 @@ public final class PromptCatalog {
                 if (tag.length() > 20) {
                     throw new IllegalStateException("버전 표기가 20자를 넘는다(steps.prompt_version): " + tag);
                 }
-                out.put(id, new Prompt(id, version, tag, commonBody + "\n\n" + body, schemaNode, compiled,
+                out.put(id, new Prompt(id, version, tag, commonBody + "\n\n" + body, schemaNode, strictNode, compiled,
                         Integer.parseInt(h.group(2)), h.group(3)));
             }
             return new PromptCatalog(out);
         } catch (IOException e) {
             throw new IllegalStateException("프롬프트를 읽지 못했다: " + location, e);
+        }
+    }
+
+    /**
+     * 공급자에게 보내지 않는 스키마 낱말. Gemini는 길이·개수·숫자 범위가 많은 스키마를 "too many states for serving"(400)으로
+     * 거부한다(S6 A1_facts에서 확인). 이 제약은 우리 쪽 검증(compiled = 파일 그대로)에서만 본다.
+     */
+    public static final java.util.Set<String> SEND_DROP = java.util.Set.of("$schema", "maxItems", "minItems", "minimum",
+            "maximum", "exclusiveMinimum", "exclusiveMaximum", "maxLength", "minLength", "pattern", "format");
+
+    /** 보낼 스키마: 검증 스키마의 깊은 복사에서 SEND_DROP 낱말을 뺀다(properties 아래의 칸 이름은 건드리지 않는다). */
+    static JsonNode sendable(JsonNode strict) {
+        JsonNode copy = strict.deepCopy();
+        strip(copy, false);
+        return copy;
+    }
+
+    private static void strip(JsonNode node, boolean namesMap) {
+        if (node instanceof tools.jackson.databind.node.ObjectNode o) {
+            if (!namesMap) {
+                SEND_DROP.forEach(o::remove);
+            }
+            for (String name : new java.util.ArrayList<>(o.propertyNames())) {
+                boolean childIsNames = !namesMap && ("properties".equals(name) || "$defs".equals(name)
+                        || "patternProperties".equals(name));
+                strip(o.get(name), childIsNames);
+            }
+        } else if (node instanceof tools.jackson.databind.node.ArrayNode a) {
+            a.forEach(x -> strip(x, false));
         }
     }
 
