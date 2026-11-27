@@ -24,6 +24,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.flywaydb:flyway-mysql'
     implementation 'com.networknt:json-schema-validator:3.0.9'   // Jackson 3(tools.jackson) 기반
+    // S10 A6 질의 임베딩(KURE-v3 int8 ONNX): 실행 중 Python 없이 Java에서. 판은 빌드 확인(build/emb, onnxruntime 1.31.1)과 같게
+    implementation 'com.microsoft.onnxruntime:onnxruntime:1.31.1'
+    // tokenizer.json(HF 빠른 토크나이저) 읽기. 네이티브 라이브러리가 jar 안에 있고, 실행 중 내려받지 않게 ai.djl.offline=true(ToolsConfig)
+    implementation 'ai.djl.huggingface:tokenizers:0.33.0'
     runtimeOnly 'com.mysql:mysql-connector-j'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
