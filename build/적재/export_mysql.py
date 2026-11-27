@@ -1,12 +1,13 @@
 """SQLite 빌드 결과 → 로컬 MySQL 적재 SQL 4개 + manifest.json (06 3절).
 
-입력(읽기 전용): data/out/의 db/privacyask.db(D1~D7), ledger/ledger.db(D8), case/case.db(D9 기준표 5개)
-출력: data/out/mysql/10_kb.sql, 20_packages.sql, 30_ledger.sql, 40_case_catalog.sql, manifest.json
-MySQL은 띄우지 않는다. 실행 순서와 주의는 docs/결과/S1_적재_순서.md(로컬 문서).
+입력(읽기 전용): data/out/의 db/privacyask.db(D1~D7), ledger/ledger.db(D8), case/case.db(D9 기준표 5개 + 규칙 3테이블)
+출력: data/out/mysql/10_kb.sql, 20_packages.sql, 30_ledger.sql, 40_case_catalog.sql, manifest.json,
+      90_reset_cases.sql(개발용: 사안 기록 D9만 비움. 기준표를 다시 넣기 전에 돌린다, 06 2.5)
+받는 스키마: server/의 Flyway V1~V4(06 2.1). MySQL은 띄우지 않는다. 순서: 빈 DB에 서버를 한 번 띄움 → 10·20·30·40 순.
 
 형식(06 3.3): SET NAMES → START TRANSACTION → 자기 테이블 DELETE(자식 먼저) → INSERT … VALUES (500행·1MB씩) → COMMIT
 → 끝에 행 수 확인 SELECT. LOAD DATA·CSV를 쓰지 않는다. 같은 입력이면 바이트까지 같은 파일(시각·경로 없음).
-값 바꾸기(2.3): 날짜 글 → DATE, 시각 글 → DATETIME(3) UTC(팀 V1 머리말), *_json → 글 그대로(JSON 형 칸이 받음), 0/1 그대로.
+값 바꾸기: 날짜 글 → DATE, 시각 글 → DATETIME(3) UTC(06 2.2), *_json → 글 그대로(JSON 형 칸이 받음), 0/1 그대로.
 
 실행: python3 적재/export_mysql.py   (build/에서)
 """
@@ -39,7 +40,9 @@ JSON_COLS = {("kb_documents", "use_scope"), ("kb_documents", "excluded_pages"), 
              ("issue_packages", "conditions_json"), ("issue_packages", "excluded_json"), ("package_items", "conds"),
              ("ledger_rows", "fields_json"), ("ledger_rows", "col_kinds_json"), ("ledger_rows", "pages_json"),
              ("ledger_rows", "merged_json"), ("ledger_rows", "flags_json"),
-             ("fact_catalog", "ledger_attachments"), ("slot_catalog", "ask_condition")}
+             ("fact_catalog", "ledger_attachments"), ("slot_catalog", "ask_condition"),
+             ("rule_sets", "exit_policy"), ("risk_rules", "condition_json"), ("risk_rules", "legal_refs"),
+             ("slot_rules", "when_json"), ("slot_rules", "values_json"), ("slot_rules", "basis_keys")}
 
 # 파일마다: 원천 DB, 테이블(INSERT 순서. DELETE는 거꾸로), 정렬. 정렬은 같은 입력이면 같은 파일이 되게 하는 것이다.
 FILES = [
@@ -53,8 +56,14 @@ FILES = [
         ("ledger_unextracted", "attachment, page, kind, ref, text")]),
     ("40_case_catalog.sql", "case", [
         ("catalog_sources", "name"), ("fact_catalog", "ord"), ("fact_options", "fact_id, ord"),
-        ("slot_catalog", "sort_order"), ("slot_options", "slot_key, ord")]),
+        ("slot_catalog", "sort_order"), ("slot_options", "slot_key, ord"),
+        ("rule_sets", "version"), ("risk_rules", "version, rule_id"), ("slot_rules", "version, slot_key, ord")]),
 ]
+# 개발용 비우기(06 2.5): 사안 기록 D9 테이블만, 자식 먼저. 기준표(40)를 사안이 FK로 가리키면 40의 DELETE가 막히므로 먼저 돌린다
+RESET_FILE = "90_reset_cases.sql"
+RESET_TABLES = ["case_judgment_citations", "case_judgment_issues", "case_judgment_slot_values", "case_judgment_slots",
+                "case_judgments", "fact_ledger_rows", "fact_values", "facts", "turns", "flows", "steps", "cases"]
+RESET_ORDER = {"turns": "turn_no DESC"}    # 답 턴(reply_to)이 받는 질문보다 먼저 지워지게(자기 참조 FK)
 SELF_REF = {"kb_documents": ("doc_id", "parent_doc_id"), "guide_sections": ("section_id", "parent_id")}
 EXPECTED = {"kb": "privacyask.db", "ledger": "ledger.db", "case": "case.db"}
 
@@ -185,23 +194,17 @@ SET SESSION sql_mode = REPLACE(@@sql_mode, 'NO_BACKSLASH_ESCAPES', '');
 """
 
 DESC = {
-    "10_kb.sql": "법령·안내서 원문 D1~D7(문서, 절, 청크, 별표, 연결, 빌드 정보). 팀 V2의 Dev KB 스냅샷 행을 이 행으로 바꾼다(06 3.4)",
+    "10_kb.sql": "법령·안내서 원문 D1~D7(문서, 절, 청크, 별표, 연결, 빌드 정보)",
     "20_packages.sql": "쟁점 꾸러미 D6(v1·v2, 항목, 원문 단위)",
     "30_ledger.sql": "처리 원장 D8(판, 행, 조각, 못 뽑은 것)",
-    "40_case_catalog.sql": "사안 기록 D9 기준표(출처 파일, 사실, 보기, 슬롯, 슬롯 값)",
+    "40_case_catalog.sql": "사안 기록 D9 기준표(출처 파일, 사실, 보기, 슬롯, 슬롯 값)와 규칙(현업 규칙 세트·위험 규칙, 슬롯 변환)",
 }
 
 
 def build_file(name, con, tables):
     data = {t: read_table(con, t, order) for t, order in tables}
     out = [HEADER.format(name=name, desc=DESC[name]), "START TRANSACTION;\n"]
-    if name == "10_kb.sql":
-        out.append(
-            "-- 06 3.4 ① 팀 스냅샷이 가진 임베딩을 chunk_key로 잠시 옮겨 둔다(우리 안내서 청크는 chunk_key가 같다)\n"
-            "DROP TEMPORARY TABLE IF EXISTS kb_emb_keep;\n"
-            "CREATE TEMPORARY TABLE kb_emb_keep AS\n"
-            "  SELECT chunk_key, embedding FROM kb_chunks WHERE chunk_key IS NOT NULL AND embedding IS NOT NULL;\n")
-    out.append("-- 지우기(자식 먼저). FK는 켜 둔 채: 이 문서를 가리키는 다른 행(예: kb_update_proposals)이 있으면 여기서 멈추고 아무것도 안 남는다\n")
+    out.append("-- 지우기(자식 먼저). FK는 켜 둔 채: 이 행을 가리키는 다른 행(예: 사안이 기준표를 가리킴)이 있으면 여기서 멈추고 아무것도 안 남는다\n")
     for t, _ in reversed(tables):
         if t in SELF_REF:
             out.append(f"UPDATE {q(t)} SET {q(SELF_REF[t][1])} = NULL;\n")
@@ -211,20 +214,32 @@ def build_file(name, con, tables):
         cols, rows = data[t]
         out.append(f"-- {t}: {len(rows)}행\n")
         out.extend(insert_statements(t, cols, rows))
-    if name == "10_kb.sql":
-        out.append(
-            "-- 06 3.4 ④ 옮겨 둔 임베딩을 우리 행에 붙인다(우리 행에 이미 임베딩이 있으면 그대로 둔다)\n"
-            "UPDATE kb_chunks c JOIN kb_emb_keep k ON c.chunk_key = k.chunk_key SET c.embedding = k.embedding WHERE c.embedding IS NULL;\n"
-            "DROP TEMPORARY TABLE kb_emb_keep;\n")
     out.append("COMMIT;\n\n-- 행 수 확인: ok 칸이 모두 OK여야 한다\n")
     extra = []
     if name == "10_kb.sql":
         extra = ["SELECT 'kb_chunks.unit_key 빈 값' AS tbl, COUNT(*) AS actual, 0 AS expected, "
                  "IF(COUNT(*) = 0, 'OK', 'MISMATCH') AS ok FROM `kb_chunks` WHERE `unit_key` IS NULL OR `unit_key` = ''",
-                 "SELECT 'kb_chunks.embedding 있는 청크(첫 적재=V2 안내서 1,253)' AS tbl, COUNT(*) AS actual, NULL AS expected, "
+                 "SELECT 'kb_chunks.embedding 있는 청크(적재는 늘 0, A6이 붙임)' AS tbl, COUNT(*) AS actual, NULL AS expected, "
                  "'참고' AS ok FROM `kb_chunks` WHERE `embedding` IS NOT NULL"]
     out.append(check_select([(t, len(data[t][1])) for t, _ in tables], extra))
     return "".join(out), data
+
+
+RESET_HEADER = """-- {name}: 개발용. 사안 기록 D9 테이블({n}개)만 비운다. 지식·기준표·규칙·호출 기록은 그대로(06 2.5)
+-- export_mysql.py가 만든 파일. 기준표(40_case_catalog.sql)를 다시 넣기 전에, 사안이 기준표를 FK로 가리키면 먼저 돌린다.
+-- 실행: mysql -h 127.0.0.1 -u <계정> -p --default-character-set=utf8mb4 <DB> < {name}
+SET NAMES utf8mb4;
+"""
+
+
+def build_reset():
+    out = [RESET_HEADER.format(name=RESET_FILE, n=len(RESET_TABLES)), "START TRANSACTION;\n", "-- 지우기(자식 먼저). FK는 켜 둔 채\n"]
+    for t in RESET_TABLES:
+        order = f" ORDER BY {RESET_ORDER[t]}" if t in RESET_ORDER else ""
+        out.append(f"DELETE FROM {q(t)}{order};\n")
+    out.append("COMMIT;\n\n-- 확인: ok 칸이 모두 OK여야 한다\n")
+    out.append(check_select([(t, 0) for t in RESET_TABLES]))
+    return "".join(out)
 
 
 def max_chars(cols, rows):
@@ -268,6 +283,10 @@ def export(kb=KB_DB, ledger=LEDGER_DB, case=CASE_DB, out=OUT):
                 manifest["tables"][t] = {"file": name, "rows": len(rows), "columns": cols, "max_chars": max_chars(cols, rows)}
                 total += len(rows)
         manifest["total_rows"] = total
+        reset = build_reset()
+        (out / RESET_FILE).write_text(reset, encoding="utf-8", newline="\n")
+        rb = reset.encode("utf-8")
+        manifest["reset"] = {RESET_FILE: {"sha256": hashlib.sha256(rb).hexdigest(), "bytes": len(rb), "tables": RESET_TABLES}}
         (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
                                            encoding="utf-8", newline="\n")
         return manifest

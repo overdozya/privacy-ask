@@ -100,80 +100,108 @@ class Catalog(unittest.TestCase):
 
     def test_sources_hash(self):
         src = dict(self.c.execute("SELECT name, sha256 FROM catalog_sources"))
-        self.assertEqual(src, {"fact_map": sha(st.FACT_MAP), "rule_set": sha(st.RULE_SET)})
+        self.assertEqual(src, {"fact_map": sha(st.FACT_MAP), "rule_set": sha(st.RULE_SET), "slot_rules": sha(st.SLOT_RULES)})
+
+    def test_rule_tables(self):
+        """06 2.4: 규칙 세트 1, 위험 규칙 16(현업 파일 그대로), 슬롯 변환 규칙(파일 그대로, note에 04 행)."""
+        rs = json.loads(st.RULE_SET.read_text(encoding="utf-8"))
+        (ver, pol, h), = self.c.execute("SELECT version, exit_policy, sha256 FROM rule_sets")
+        self.assertEqual((ver, json.loads(pol), h), (rs["version"], rs["exit_policy"], sha(st.RULE_SET)))
+        got = {r[0]: (json.loads(r[1]), r[2]) for r in self.c.execute("SELECT rule_id, condition_json, grade FROM risk_rules")}
+        self.assertEqual(got, {r["rule_id"]: (r["condition"], r["grade"]) for r in rs["risk_rules"]})
+        doc = json.loads(st.SLOT_RULES.read_text(encoding="utf-8"))
+        rows = self.c.execute("SELECT slot_key, ord, when_json, effect, values_json, flag, note FROM slot_rules ORDER BY slot_key, ord").fetchall()
+        want = sorted((k, r["ord"], r["when"], r["effect"], r["values"], r["flag"]) for k, v in doc["slots"].items() for r in v)
+        self.assertEqual([(k, o, json.loads(w), e, json.loads(v), f) for k, o, w, e, v, f, _ in rows], want)
+        self.assertTrue(all(n.startswith("[04 ") for *_, n in rows))
+        self.assertEqual(self.c.execute("SELECT version FROM catalog_sources WHERE name='slot_rules'").fetchone()[0], doc["version"])
+
+
+TYPES = r"(?:CHAR|VARCHAR|TEXT|MEDIUMTEXT|INTEGER|INT|BIGINT|SMALLINT|REAL|DECIMAL|JSON|DATE|DATETIME|TINYINT|MEDIUMBLOB)\b"
 
 
 def tables(sql_text):
-    """CREATE TABLE 이름 → 칸 이름 목록(제약 줄 제외)."""
+    """CREATE TABLE 이름 → 칸 이름 목록(제약 줄 제외). 백틱·IF NOT EXISTS·MySQL 꼬리(ENGINE …)를 받아 준다."""
     out = {}
-    for name, body in re.findall(r"CREATE TABLE (\w+) \((.*?)\n\)", sql_text, re.S):
+    for name, body in re.findall(r"CREATE TABLE (?:IF NOT EXISTS )?`?(\w+)`? \((.*?)\n\)", sql_text, re.S):
         cols = []
         for line in body.split("\n"):
-            m = re.match(r"\s+(\w+)\s+(?:CHAR|VARCHAR|TEXT|INTEGER|INT|BIGINT|REAL|DECIMAL|JSON|DATE|DATETIME|TINYINT)", line)
-            if m and m.group(1) not in ("PRIMARY", "UNIQUE", "FOREIGN", "CONSTRAINT", "KEY", "CHECK"):
+            m = re.match(r"\s+`?(\w+)`?\s+" + TYPES, line, re.I)
+            if m and m.group(1).upper() not in ("PRIMARY", "UNIQUE", "FOREIGN", "CONSTRAINT", "KEY", "CHECK", "INDEX"):
                 cols.append(m.group(1))
         out[name] = cols
     return out
 
 
+MIGRATIONS = ("V4", "V5", "V6")      # 기준표·규칙 / 사안 / 판정(06 2.1). D9 MySQL DDL의 기준은 이 파일들이다(06 2.3)
+
+
 class Schema(unittest.TestCase):
+    """SQLite 판(schema.sql)과 S2의 Flyway V4·V5·V6은 테이블·칸 이름이 같다. MySQL에만 있는 칸은 facts.flow_key(06 2.3-1)."""
+
     def setUp(self):
         strip = lambda t: re.sub(r"--[^\n]*", "", t)   # 주석 빼고 DDL만 본다
         self.lite = strip((ROOT / "case" / "schema.sql").read_text(encoding="utf-8"))
-        self.my = strip((ROOT / "case" / "schema_mysql.sql").read_text(encoding="utf-8"))
+        files = [f for v in MIGRATIONS for f in sorted(P.MIGRATION.glob(f"{v}__*.sql"))] if P.MIGRATION.exists() else []
+        self.my = strip("\n".join(f.read_text(encoding="utf-8") for f in files)) if len(files) == len(MIGRATIONS) else None
+
+    def need_my(self):
+        if self.my is None:
+            self.skipTest("S2 파일 없음(server/…/db/migration/V4·V5·V6)")
+
+    def test_lite_tables(self):
+        a = tables(self.lite)
+        self.assertEqual(len(a), 20)                     # 기준표 5 + 규칙 3 + 사안 7 + 판정 5
+        self.assertIn("CREATE VIEW facts_current", self.lite)
+        for t in ("cases", "flows", "facts", "turns", "case_judgments", "rule_sets", "risk_rules", "slot_rules"):
+            self.assertIn(t, a)
+        self.assertIn("CREATE UNIQUE INDEX uk_facts_rev ON facts (case_id, IFNULL(flow_no, 0), fact_id, rev)", self.lite)
+        self.assertNotIn("Asia/Seoul", (ROOT / "case" / "schema.sql").read_text(encoding="utf-8"))   # 시각은 UTC(06 2.2)
 
     def test_same_tables_and_columns(self):
+        self.need_my()
         a, b = tables(self.lite), tables(self.my)
-        self.assertEqual(list(a), list(b))
-        self.assertEqual(len(a), 17)
+        self.assertEqual(sorted(a), sorted(b))
+        b["facts"] = [c for c in b["facts"] if c != "flow_key"]
         for t in a:
             self.assertEqual(a[t], b[t], t)
-        self.assertIn("CREATE VIEW facts_current", self.lite)
         self.assertIn("CREATE VIEW facts_current", self.my)
-        for t in ("cases", "flows", "facts", "turns", "case_judgments"):   # 계획 D9의 다섯 테이블
-            self.assertIn(t, a)
 
     def test_judgment_tables_renamed(self):
-        """판정 테이블 5개는 case_ 접두. 팀 judgments·judgment_issues와 같은 이름·같은 제약 이름이 없다(06 2.4-1, F1)."""
-        mine = tables(self.my)
-        want = ["case_judgments", "case_judgment_slots", "case_judgment_slot_values", "case_judgment_issues", "case_judgment_citations"]
-        for n in want:
-            self.assertIn(n, mine)
-        for bad in ("judgments", "judgment_slots", "judgment_slot_values", "judgment_issues", "judgment_citations"):
-            self.assertNotIn(bad, mine)
-        v1 = P.TEAM_V1
-        if not v1.exists():
-            self.skipTest("팀 V1 없음")
-        team = v1.read_text(encoding="utf-8")
-        team_tables = set(re.findall(r"CREATE TABLE `?(\w+)`?", team))
-        self.assertEqual(set(mine) & team_tables, set(), "팀 테이블과 이름이 겹침")
-        mine_names = set(re.findall(r"CONSTRAINT (\w+)", self.my)) | set(re.findall(r"(?:UNIQUE )?KEY (\w+) \(", self.my))
-        team_names = set(re.findall(r"CONSTRAINT `?(\w+)`?", team))
-        self.assertEqual(mine_names & team_names, set(), "팀 제약 이름과 겹침")
+        """판정 테이블 5개는 case_ 접두(06 2.1)."""
+        for sql in (self.lite,) + ((self.my,) if self.my else ()):
+            mine = tables(sql)
+            for n in ("case_judgments", "case_judgment_slots", "case_judgment_slot_values", "case_judgment_issues", "case_judgment_citations"):
+                self.assertIn(n, mine)
+            for bad in ("judgments", "judgment_slots", "judgment_slot_values", "judgment_issues", "judgment_citations"):
+                self.assertNotIn(bad, mine)
 
     def test_case_pins_status_attempts_collation(self):
-        lite, my = tables(self.lite), tables(self.my)
-        for t in (lite, my):
+        sqls = [self.lite] + ([self.my] if self.my else [])
+        for sql in sqls:
+            t = tables(sql)
             for c in ("requester_id", "rule_set_version", "package_version", "ledger_version"):
                 self.assertIn(c, t["cases"])
-            self.assertNotIn("flow_type", t["flows"])           # 2.4-6: 흐름 유형 칸을 두지 않는다
+            self.assertFalse({"type", "kind", "flow_type", "flow_kind"} & set(t["flows"]))   # 흐름 유형 칸을 두지 않는다
             self.assertEqual({"label", "origin", "destination", "service_name"} & set(t["flows"]), {"label", "origin", "destination", "service_name"})
-            self.assertFalse({"type", "kind", "flow_type", "flow_kind"} & set(t["flows"]))
-        for sql in (self.lite, self.my):
-            self.assertIn("'CONFIRMED','MATCHED','INFERRED','NOT_FOUND','UNKNOWN'", sql)
-            self.assertIn("attempts IN (1,2,3)", sql)
-        for col in ("fact_options", "fact_values", "slot_options", "case_judgment_slot_values"):   # 06 2.3: 허용 값 칸은 이진 비교
-            m = re.search(r"CREATE TABLE %s \((.*?)\n\)" % col, self.my, re.S).group(1)
-            self.assertIn("COLLATE utf8mb4_bin", m, col)
+            self.assertIn("'CONFIRMED','MATCHED','INFERRED','NOT_FOUND','UNKNOWN'", sql.replace(", ", ","))
+            self.assertIn("attempts IN (1,2,3)", sql.replace(", ", ","))
+            self.assertIn("'SET','ADD','SKIP'", sql.replace(", ", ","))
         self.assertNotIn("COLLATE utf8mb4_bin", self.lite)       # SQLite는 기본이 이진 비교
+        if self.my:
+            for col in ("fact_options", "fact_values", "slot_options", "case_judgment_slot_values"):   # 06 2.2: 허용 값 칸은 이진 비교
+                m = re.search(r"CREATE TABLE `?%s`? \((.*?)\n\)" % col, self.my, re.S).group(1)
+                self.assertIn("COLLATE utf8mb4_bin", m, col)
 
     def test_no_sqlite_only_features(self):
         for bad in ("WITHOUT ROWID", "STRICT", "AUTOINCREMENT", "GLOB", "typeof("):
             self.assertNotIn(bad, self.lite)
         for idx in re.findall(r"CREATE INDEX[^;]*;", self.lite):
             self.assertNotIn(" WHERE ", idx)          # 부분 인덱스 없음
+        for idx in re.findall(r"CREATE (?:UNIQUE )?INDEX[^;]*;", self.lite):
+            self.assertNotIn(" WHERE ", idx)
         for word in (" usage ", " condition ", " rows "):   # MySQL 예약어를 칸 이름으로 쓰지 않음
-            self.assertNotIn(word, self.my.lower().replace("(", " ").replace(",", " "))
+            self.assertNotIn(word, self.lite.lower().replace("(", " ").replace(",", " "))
 
 
 class Fixture(unittest.TestCase):

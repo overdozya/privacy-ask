@@ -27,6 +27,8 @@ PACKAGE_FILES = (INPUT / "꾸러미_v1.json", INPUT / "꾸러미_v2.json")
 FACT_MAP = INPUT / "04_쟁점사실_대응표_20261126.tsv"
 LEDGER_OVERRIDES = INPUT / "쪽경계_수정.json"
 EXAMPLE_CASE = INPUT / "예시사안.json"
+SLOT_RULES = INPUT / "슬롯변환_v1.json"                  # 04 1.1~1.10 슬롯 변환 규칙(06 2.4 slot_rules)
+SLOT_RULES_VECTOR_SPEC = INPUT / "슬롯변환_v1_벡터.json"   # 지은 벡터: 입력 사실 + 사람이 적은 기대 슬롯
 
 # ---- 참고(읽기만)
 BUNDLE = REF / "PrivacyAsk_RAG실험묶음_20261125"
@@ -50,7 +52,11 @@ LEDGER_CHECK = LEDGER_OUT / "점검"
 CASE_OUT = OUT / "case"
 CASE_DB = CASE_OUT / "case.db"
 CASE_REPLAY = CASE_OUT / "예시사안_재현표.md"
+SLOT_RULES_VECTORS = CASE_OUT / "slot_rules_vectors.json"
 MYSQL_OUT = OUT / "mysql"
+
+# ---- 서버(S2가 만드는 Flyway). D9 MySQL DDL의 기준(06 2.3). 없으면 그 비교 테스트는 건너뛴다
+MIGRATION = REPO / "server" / "src" / "main" / "resources" / "db" / "migration"
 
 # ---- 레포 밖(있을 때만 쓰는 대조용). 없으면 그 테스트는 건너뛴다
 TEAM_V1 = REPO.parent / "backend" / "data" / "local-init" / "V1__create_schema.sql"

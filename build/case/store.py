@@ -26,6 +26,7 @@ LEDGER_DB = P.LEDGER_DB
 SCHEMA = HERE / "schema.sql"
 EXAMPLE = P.EXAMPLE_CASE
 OUT = P.CASE_DB
+SLOT_RULES = P.SLOT_RULES
 
 # 허용 값 칸 읽는 법(무엇을 보고 정하나). 값 자체는 tsv 글자 그대로다.
 UNKNOWN_LABELS = ("잘 모르겠음", "모름")               # 현업이 고르는 '모름' 버튼
@@ -143,19 +144,28 @@ def ins(con, table, row):
     return cur.lastrowid
 
 
-def create_db(path: Path, fact_map: Path = FACT_MAP, rule_set: Path = RULE_SET):
-    """빈 사안 DB + 기준표. 있던 파일은 덮지 않는다(부르는 쪽이 새 경로를 준다)."""
+def create_db(path: Path, fact_map: Path = FACT_MAP, rule_set: Path = RULE_SET, slot_rules_file: Path = SLOT_RULES):
+    """빈 사안 DB + 기준표 + 규칙 3테이블(06 2.4). 있던 파일은 덮지 않는다(부르는 쪽이 새 경로를 준다).
+    슬롯 변환 규칙은 넣기 전에 slot_rules.check로 기준표·KB와 대조하고, 어긋나면 DB를 만들지 않는다."""
+    import slot_rules as sr   # 같은 폴더. slot_rules가 이 모듈을 읽으므로 여기서 부른다
     if path.exists():
         raise FileExistsError(path)
+    doc = sr.load(slot_rules_file)
+    errs = sr.check(doc, sr.catalog(fact_map, rule_set))
+    if errs:
+        raise ValueError("슬롯 변환 규칙 검사 실패: " + "; ".join(errs[:5]))
     con = sqlite3.connect(path)
     con.executescript(SCHEMA.read_text(encoding="utf-8"))
     cat, fopts = read_fact_map(fact_map)
     rs, slots, sopts = read_rule_set(rule_set)
+    rs_head, risks = sr.rule_set_rows(rule_set)
     with con:
         ins(con, "catalog_sources", dict(name="fact_map", path=rel(fact_map), version=fact_map.stem.rsplit("_", 1)[-1],
                                          sha256=sha256_bytes(fact_map.read_bytes())))
         ins(con, "catalog_sources", dict(name="rule_set", path=rel(rule_set), version=rs["version"],
                                          sha256=sha256_bytes(rule_set.read_bytes())))
+        ins(con, "catalog_sources", dict(name="slot_rules", path=rel(slot_rules_file), version=doc["version"],
+                                         sha256=sha256_bytes(slot_rules_file.read_bytes())))
         for r in cat:
             ins(con, "fact_catalog", r)
         for r in fopts:
@@ -164,6 +174,11 @@ def create_db(path: Path, fact_map: Path = FACT_MAP, rule_set: Path = RULE_SET):
             ins(con, "slot_catalog", r)
         for r in sopts:
             ins(con, "slot_options", r)
+        ins(con, "rule_sets", rs_head)
+        for r in risks:
+            ins(con, "risk_rules", r)
+        for r in sr.slot_rule_rows(doc):
+            ins(con, "slot_rules", r)
     con.close()
 
 

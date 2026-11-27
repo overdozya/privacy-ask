@@ -2,7 +2,7 @@
 
 - manifest의 테이블별 행 수 = SQLite 행 수, 그리고 SQL 파일에서 다시 읽어 센 행 수도 같다(완료 기준 2)
 - SQL을 MySQL 규칙(백슬래시 이스케이프)으로 직접 읽어, 바꾸지 않는 칸은 SQLite 값과 글자까지 같다
-- 바꾸는 칸(날짜·시각)은 형식, 4개 파일의 틀(DELETE 순서, 06 3.4 임베딩 옮기기), 팀 V1 칸과의 관계
+- 바꾸는 칸(날짜·시각)은 형식, 4개 파일의 틀(DELETE 순서), 규칙 3테이블(06 2.4·2.5), 개발용 90_reset_cases.sql
 MySQL은 띄우지 않는다. privacyask.db·ledger.db·case.db가 없으면 건너뛴다.
 """
 import hashlib
@@ -20,7 +20,6 @@ import paths as P  # noqa: E402
 sys.path.insert(0, str(ROOT / "적재"))
 import export_mysql as ex  # noqa: E402
 
-V1 = P.TEAM_V1
 
 
 # ───────── MySQL 글자 읽기(검증용. export_mysql.py의 쓰기 코드와 따로 만든 읽기) ─────────
@@ -173,7 +172,7 @@ class Export(unittest.TestCase):
 
     def test_files_exist(self):
         self.assertEqual(sorted(p.name for p in self.out.iterdir()),
-                         ["10_kb.sql", "20_packages.sql", "30_ledger.sql", "40_case_catalog.sql", "manifest.json"])
+                         ["10_kb.sql", "20_packages.sql", "30_ledger.sql", "40_case_catalog.sql", "90_reset_cases.sql", "manifest.json"])
         self.assertEqual(json.loads((self.out / "manifest.json").read_text(encoding="utf-8")), self.m)
 
     def test_manifest_rows_equal_sqlite_rows(self):
@@ -249,19 +248,43 @@ class Export(unittest.TestCase):
             self.assertEqual(order, [t for t, _ in tables], name)
             self.assertNotIn("LOAD DATA", (self.out / name).read_text(encoding="utf-8"))
 
-    def test_kb_snapshot_replacement_sequence(self):
-        """06 3.4: 임베딩 옮겨 두기 → 지우기 → 우리 행 INSERT(임베딩 NULL) → chunk_key로 UPDATE."""
-        s = self.stmts["10_kb.sql"]
-        idx = lambda pre: next(i for i, x in enumerate(s) if x.startswith(pre))
-        i_keep, i_del = idx("CREATE TEMPORARY TABLE kb_emb_keep"), idx("DELETE FROM `build_info`")
-        i_ins_last = max(i for i, x in enumerate(s) if x.startswith("INSERT INTO"))
-        i_upd = idx("UPDATE kb_chunks c JOIN kb_emb_keep k ON c.chunk_key = k.chunk_key")
-        self.assertTrue(i_keep < i_del < idx("INSERT INTO `kb_chunks`") < i_ins_last < i_upd < idx("COMMIT"))
-        self.assertIn("WHERE chunk_key IS NOT NULL AND embedding IS NOT NULL", s[i_keep])
+    def test_kb_chunks_no_embedding_carry(self):
+        """06 2.5: 빈 DB에 넣으므로 임베딩 옮기기(kb_emb_keep)를 하지 않는다. 우리 행은 임베딩 NULL, 안내서 청크만 chunk_key."""
+        self.assertNotIn("kb_emb_keep", (self.out / "10_kb.sql").read_text(encoding="utf-8"))
         cols, rows = self.parsed["10_kb.sql"]["kb_chunks"]
-        self.assertTrue(all(r[cols.index("embedding")] is None for r in rows))          # 우리 행은 임베딩 NULL로 들어간다
-        self.assertEqual(sum(r[cols.index("chunk_key")] is not None for r in rows), 3925)   # 안내서 청크만 chunk_key
+        self.assertTrue(all(r[cols.index("embedding")] is None for r in rows))
+        self.assertEqual(sum(r[cols.index("chunk_key")] is not None for r in rows), 3925)
         self.assertTrue(all(r[cols.index("unit_key")] for r in rows))
+
+    def test_rule_tables_in_catalog_file(self):
+        """06 2.4: 40번 파일에 규칙 3테이블. 행 = 현업 규칙 세트 1·위험 규칙 16·슬롯 변환 규칙 파일의 규칙 수, 출처 행 3개."""
+        tables = [t for t, _ in dict((n, tb) for n, _, tb in ex.FILES)["40_case_catalog.sql"]]
+        self.assertEqual(tables[-3:], ["rule_sets", "risk_rules", "slot_rules"])
+        rules = json.loads(P.SLOT_RULES.read_text(encoding="utf-8"))
+        want = {"rule_sets": 1, "risk_rules": 16, "slot_rules": sum(len(v) for v in rules["slots"].values()), "catalog_sources": 3}
+        self.assertEqual({t: self.m["tables"][t]["rows"] for t in want}, want)
+        self.assertEqual(self.m["catalog_sources"]["slot_rules"]["sha256"], ex.sha256_file(P.SLOT_RULES))
+        cols, rows = self.parsed["40_case_catalog.sql"]["slot_rules"]
+        for r in rows:                                   # JSON 칸은 MySQL JSON 형이 받으므로 글이 JSON이어야 한다
+            for c in ("when_json", "values_json", "basis_keys"):
+                json.loads(r[cols.index(c)])
+            self.assertIn(r[cols.index("effect")], ("SET", "ADD", "SKIP"))
+            self.assertTrue(r[cols.index("note")].startswith("[04 "))
+
+    def test_reset_file(self):
+        """90_reset_cases.sql: D9 12테이블만 자식 먼저 지우고(답 턴이 먼저), 기준표·지식·규칙은 건드리지 않는다."""
+        text = (self.out / ex.RESET_FILE).read_text(encoding="utf-8")
+        dels = re.findall(r"^DELETE FROM `(\w+)`", text, re.M)
+        self.assertEqual(dels, ex.RESET_TABLES)
+        self.assertIn("DELETE FROM `turns` ORDER BY turn_no DESC;", text)
+        kept = {t for _, _, tb in ex.FILES for t, _ in tb}
+        self.assertEqual(set(dels) & kept, set())
+        self.assertEqual(text.count("START TRANSACTION"), 1)
+        self.assertEqual(self.m["reset"][ex.RESET_FILE]["sha256"], hashlib.sha256(text.encode("utf-8")).hexdigest())
+        if P.MIGRATION.exists():                         # S2의 V5·V6이 있으면 D9 테이블이 그 파일의 테이블과 같다
+            ddl = "".join(f.read_text(encoding="utf-8") for f in sorted(P.MIGRATION.glob("V[56]__*.sql")))
+            if ddl:
+                self.assertEqual(set(re.findall(r"CREATE TABLE `?(\w+)`?", ddl)), set(ex.RESET_TABLES))
 
     def test_batches_are_small(self):
         for name, *_ in ex.FILES:
@@ -289,7 +312,8 @@ class Export(unittest.TestCase):
         want = {"kb_documents": 50, "guide_sections": 3474, "kb_chunks": 12920, "kb_annexes": 94, "kb_links": 14728,
                 "issue_packages": 28, "package_items": 576, "package_item_units": 935,
                 "ledger_rows": 1494, "ledger_segments": 7212, "ledger_unextracted": 5,
-                "fact_catalog": 46, "fact_options": 162, "slot_catalog": 8, "slot_options": 29, "catalog_sources": 2}
+                "fact_catalog": 46, "fact_options": 162, "slot_catalog": 8, "slot_options": 29, "catalog_sources": 3,
+                "rule_sets": 1, "risk_rules": 16}
         self.assertEqual({t: self.m["tables"][t]["rows"] for t in want}, want)
 
     def test_ledger_row_hash_survives_mysql_json(self):
@@ -297,39 +321,6 @@ class Export(unittest.TestCase):
         (', ' 구분, 한글 그대로) 지금 글이 이미 그 모양이어야 해시가 MySQL에서도 같다. 아니면 fields_json은 MEDIUMTEXT로 둔다."""
         for (v,) in self.src["ledger"].execute("SELECT fields_json FROM ledger_rows"):
             self.assertEqual(json.dumps(json.loads(v), ensure_ascii=False), v)
-
-
-@unittest.skipUnless(V1.exists(), "팀 V1 없음")
-class TeamV1(unittest.TestCase):
-    """KB 두 테이블은 팀 칸 + 06 2.1이 말한 더하는 칸(문서 12, 청크 13)과 같고, 새 테이블 이름은 팀 테이블과 겹치지 않는다."""
-
-    @classmethod
-    def setUpClass(cls):
-        need_dbs()
-        cls.v1 = V1.read_text(encoding="utf-8")
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.m = ex.export(out=cls.tmp.name)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.tmp.cleanup()
-
-    def team_cols(self, table):
-        body = re.search(r"CREATE TABLE `?%s`? \((.*?)\n\) ENGINE" % table, self.v1, re.S).group(1)
-        return [m.group(1) for m in re.finditer(r"^\s+`?(\w+)`? (?:bigint|varchar|char|text|date|datetime|smallint|tinyint|mediumblob|int)\b", body, re.M)]
-
-    def test_extra_columns_counts(self):
-        for table, extra in (("kb_documents", 12), ("kb_chunks", 13)):
-            team, ours = self.team_cols(table), self.m["tables"][table]["columns"]
-            self.assertGreater(len(team), 10)
-            self.assertEqual(set(team) - set(ours), set(), f"{table}: 팀 칸이 우리 적재에 없음")
-            self.assertEqual(len(set(ours) - set(team)), extra, f"{table}: 06 2.1이 센 더하는 칸 수")
-        self.assertEqual(set(self.m["tables"]["kb_chunks"]["columns"]) - set(self.team_cols("kb_chunks")),
-                         {"unit_key", "jo", "jo_sub", "hang", "ho", "ho_from", "ho_to", "mok", "title", "source_file", "section_id", "page_from", "page_to"})
-
-    def test_new_tables_do_not_collide(self):
-        team = set(re.findall(r"CREATE TABLE `?(\w+)`?", self.v1))
-        self.assertEqual((set(self.m["tables"]) - {"kb_documents", "kb_chunks"}) & team, set())
 
 
 if __name__ == "__main__":

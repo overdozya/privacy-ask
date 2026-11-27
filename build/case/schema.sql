@@ -1,7 +1,7 @@
--- 사안 기록(D9) SQLite 판. 테스트·예시용. 운영(MySQL 8)은 schema_mysql.sql(같은 테이블·같은 칸).
+-- 사안 기록(D9) SQLite 판. 테스트·예시용. 운영(MySQL 8.4)은 server/의 Flyway V4(기준표·규칙)·V5(사안)·V6(판정)이 기준이고 칸 이름이 같다(06 2.1·2.3).
 -- 계획: 03_DB_에이전트_설계계획 3.2 D9, 4절 A0~A8. 사실 ID·허용 값: 04_쟁점사실_대응표_20261126.tsv.
 -- 이식성: SQLite 전용 기능(동적 타입에 기대기, WITHOUT ROWID, 부분 인덱스, STRICT)을 쓰지 않는다.
---   날짜는 'YYYY-MM-DD'(MySQL DATE), 시각은 'YYYY-MM-DD HH:MM:SS.fff' Asia/Seoul(MySQL DATETIME(3)) 글자로 넣는다.
+--   날짜는 'YYYY-MM-DD'(MySQL DATE), 시각은 'YYYY-MM-DD HH:MM:SS.fff' UTC(MySQL DATETIME(3), 06 2.2) 글자로 넣는다.
 --   JSON 칸은 json_valid 검사(MySQL은 JSON 형), 참·거짓은 0/1(MySQL TINYINT(1)).
 -- 거부 규칙: 칸 제약(NOT NULL·CHECK·FK)으로 되는 것은 여기서, 다른 DB(privacyask.db·ledger.db)를 봐야 하는 것은
 --   case/store.py가 막는다. 규칙 목록과 번호(C01~C17)는 case/4b단계_사안기록_결과.md 3절.
@@ -12,8 +12,8 @@ PRAGMA foreign_keys = ON;
 
 -- 기준 파일과 해시. 판정이 어느 대응표·규칙 세트로 됐는지 남기는 기준
 CREATE TABLE catalog_sources (
-  name        VARCHAR(40)  NOT NULL PRIMARY KEY,  -- fact_map(04 대응표 tsv) / rule_set(현업 rule_set_v1.0.json)
-  path        VARCHAR(300) NOT NULL,              -- mainproject/ 기준 상대 경로
+  name        VARCHAR(40)  NOT NULL PRIMARY KEY,  -- fact_map(04 대응표 tsv) / rule_set(현업 rule_set_v1.0.json) / slot_rules(슬롯변환_v1.json)
+  path        VARCHAR(300) NOT NULL,              -- 레포(privacy-ask/) 기준 상대 경로
   version     VARCHAR(40)  NOT NULL,              -- 파일 이름의 날짜 / rule_set version
   sha256      CHAR(64)     NOT NULL
 );
@@ -61,6 +61,45 @@ CREATE TABLE slot_options (
   ord       INTEGER     NOT NULL,
   value     VARCHAR(60) NOT NULL,                  -- allowed_values 글자 그대로
   PRIMARY KEY (slot_key, value)
+);
+
+-- 현업 규칙 세트(rule_set_v1.0.json) 머리. 출구 정책은 등급 → 출구(06 2.4)
+CREATE TABLE rule_sets (
+  version       VARCHAR(10)  NOT NULL PRIMARY KEY,
+  status        VARCHAR(20)  NOT NULL,
+  change_reason TEXT         NOT NULL,
+  exit_policy   TEXT         NOT NULL CHECK (json_valid(exit_policy)),   -- {"H":"TRANSFER","M":"TRANSFER","L":"ANSWER"}
+  sha256        CHAR(64)     NOT NULL
+);
+
+-- 현업 위험 규칙 16개. 조건식은 06 3.2 꼴 그대로(현업 행은 고치지 않음)
+CREATE TABLE risk_rules (
+  version        VARCHAR(10)  NOT NULL REFERENCES rule_sets(version),
+  rule_id        VARCHAR(10)  NOT NULL,
+  name           VARCHAR(100) NOT NULL,
+  axis           VARCHAR(40)  NOT NULL,
+  condition_json TEXT         NOT NULL CHECK (json_valid(condition_json)),
+  grade          CHAR(1)      NOT NULL CHECK (grade IN ('H','M','L')),
+  issue_name     VARCHAR(50)  NOT NULL,
+  legal_refs     TEXT         NOT NULL CHECK (json_valid(legal_refs)),
+  description    TEXT         NOT NULL,
+  active         INTEGER      NOT NULL CHECK (active IN (0,1)),
+  PRIMARY KEY (version, rule_id)
+);
+
+-- 04 대응표 1.1~1.10 슬롯 변환 규칙(슬롯변환_v1.json). 뜻은 그 파일의 '의미' 절, 기준 평가기는 case/slot_rules.py
+--   SINGLE 슬롯: ord 순 처음 참인 SET(또는 SKIP). MULTI 슬롯: 참인 ADD를 모두 합침. SKIP = 묻지 않음(SKIPPED)
+CREATE TABLE slot_rules (
+  version     VARCHAR(10)  NOT NULL,                 -- 슬롯 변환 판(v1). catalog_sources 'slot_rules'의 version과 같음
+  slot_key    VARCHAR(40)  NOT NULL REFERENCES slot_catalog(slot_key),
+  ord         INTEGER      NOT NULL CHECK (ord >= 1),
+  when_json   TEXT         NOT NULL CHECK (json_valid(when_json)),   -- 조건식(fact·status·slot·ledger 원자 + all·any·not)
+  effect      VARCHAR(4)   NOT NULL CHECK (effect IN ('SET','ADD','SKIP')),
+  values_json TEXT         NOT NULL CHECK (json_valid(values_json)), -- 슬롯 값 목록(SET 하나, ADD 0개 이상, SKIP 빈 목록)
+  flag        VARCHAR(14)  CHECK (flag IS NULL OR flag IN ('FACT_CONFLICT','CHECK_ITEM')),
+  basis_keys  TEXT         NOT NULL CHECK (json_valid(basis_keys)),  -- 근거 조문·안내서 절 키
+  note        TEXT         NOT NULL,                 -- '[04 1.4-5] …': 옮긴 04 행과 한 줄 설명
+  PRIMARY KEY (version, slot_key, ord)
 );
 
 -- ───────── 사안 기록 ─────────
@@ -162,7 +201,6 @@ CREATE TABLE facts (
   ledger_version VARCHAR(20),                       -- LEDGER: 처리방침 판(ledger_versions.version_id)
   note          TEXT,
   recorded_at   VARCHAR(23)  NOT NULL,
-  UNIQUE (case_id, flow_no, fact_id, rev),
   UNIQUE (fact_row_id, fact_id),
   FOREIGN KEY (case_id, flow_no) REFERENCES flows(case_id, flow_no),
   FOREIGN KEY (case_id, source_turn) REFERENCES turns(case_id, turn_no),
@@ -171,7 +209,8 @@ CREATE TABLE facts (
   CHECK (source_kind <> 'LEDGER' OR ledger_version IS NOT NULL),
   CHECK (source_kind = 'LEDGER' OR ledger_version IS NULL)
 );
-CREATE INDEX idx_facts_case ON facts (case_id, flow_no, fact_id);
+-- 공통 사실(flow_no NULL)도 같은 판이 두 번 들어가지 않게 식 색인(06 2.3-1. MySQL은 생성 칸 flow_key). 같은 색인이 사안의 지금 사실 읽기에 쓰인다
+CREATE UNIQUE INDEX uk_facts_rev ON facts (case_id, IFNULL(flow_no, 0), fact_id, rev);
 
 -- [하위 테이블] 사실 값. 고른 보기 하나 = 한 행. (fact_id, label) FK로 허용 값 밖 값은 DB가 거부한다(C08)
 CREATE TABLE fact_values (
@@ -200,7 +239,7 @@ SELECT f.* FROM facts f
 WHERE NOT EXISTS (
   SELECT 1 FROM facts g
   WHERE g.case_id = f.case_id AND g.fact_id = f.fact_id AND g.rev > f.rev
-    AND (g.flow_no = f.flow_no OR (g.flow_no IS NULL AND f.flow_no IS NULL)));
+    AND IFNULL(g.flow_no, 0) = IFNULL(f.flow_no, 0));
 
 -- 판정(A8 기록 항목 전부). 팀 judgments에 버전·기준일·인용 해시를 더한 것. 팀 judgments·judgment_issues와 이름이 겹쳐 case_ 접두(06 2.4-1)
 CREATE TABLE case_judgments (
