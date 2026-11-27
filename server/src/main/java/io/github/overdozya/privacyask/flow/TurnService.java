@@ -1053,6 +1053,10 @@ public class TurnService {
         return b;
     }
 
+    public Optional<JudgmentReader.Stored> storedJudgment(String caseId) {
+        return verify.reader().latest(caseId);
+    }
+
     /** 판정이 있으면 판정 테이블에서 지은 최종 결과, 없으면 예비 결과(옛 사안·A8 전). */
     TurnResult.Result finalOr(String caseId, java.util.function.Supplier<TurnResult.Result> fallback) {
         return verify.reader().latest(caseId).map(s -> finalResult(caseId, s)).orElseGet(fallback);

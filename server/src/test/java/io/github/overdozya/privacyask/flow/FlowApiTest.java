@@ -446,6 +446,12 @@ class FlowApiTest {
                 .isEqualTo(steps);
         // API 4 last도 판정 테이블의 결과
         assertThat(get("/api/cases/" + id).body().get("last").get("result")).isEqualTo(res);
+        // API 8 검토 요청 묶음(이관)
+        Res rv = get("/api/cases/" + id + "/review");
+        assertThat(rv.status()).as(String.valueOf(rv.body())).isEqualTo(200);
+        assertThat(rv.body().get("state").asString()).isEqualTo("TRANSFERRED");
+        assertThat(Condition.strings(rv.body().get("bundle").get("summary"))).hasSize(2);
+        assertThat(rv.body().get("bundle").get("flows")).hasSize(2);
         // 닫힌 사안에 답 → 409 NOT_ASKING
         Res closed = post("/api/cases/" + id + "/answers", answer(9, "아니오"));
         assertThat(closed.status()).isEqualTo(409);
@@ -933,5 +939,89 @@ class FlowApiTest {
         String id = r.body().get("case_id").asString();
         assertThat(outcomes(id, "A5_general_answer")).containsExactly("CHECK_FAIL", "OK");
         assertThat(r.body().get("result").get("answer").get("answer_text").asString()).isEqualTo("고친 답.");
+    }
+
+    // ───────── S9 ③ 즉답 사안 ─────────
+
+    /**
+     * 예시 문의의 흐름 1(고지 문자 발송)을 위탁이 아닌 회사 안 처리로 바꾼 손 출력: 사실 F-T1 '아니오'(넘기지 않음), 서버 해외 아님.
+     * 원장 명시 일치로 수집·이용 근거 L 하나, 모르는 사실 없음 → 사유 없음 → exit_policy[L] = ANSWER → JUDGED.
+     */
+    static String lowOnlyA1() {
+        ObjectNode a1 = (ObjectNode) JSON.readTree(a1Json);
+        ArrayNode flows = JSON.createArrayNode();
+        flows.add(a1.get("flows").get(0));
+        a1.set("flows", flows);
+        ArrayNode facts = JSON.createArrayNode();
+        for (JsonNode f : a1.get("facts")) {
+            String id = f.get("fact").asString();
+            boolean common = f.get("flows").isEmpty();
+            boolean mine = false;
+            for (JsonNode n : f.get("flows")) {
+                mine |= n.asInt() == 1;
+            }
+            if (!(common || mine) || id.equals("F-T2") || id.equals("F-T3")) {
+                continue;
+            }
+            ObjectNode n = (ObjectNode) f.deepCopy();
+            if (!common) {
+                n.putArray("flows").add(1);
+            }
+            if (id.equals("F-T1")) {
+                n.putArray("values").addObject().put("label", "아니오(우리 회사 안에서만)");
+                n.put("quote", "고지사항 문자를");
+            }
+            if (id.equals("F-S2")) {
+                continue;
+            }
+            facts.add(n);
+        }
+        ObjectNode c2 = facts.addObject();
+        c2.put("fact", "F-C2");
+        c2.putArray("flows").add(1);
+        c2.putArray("values").addObject().put("label", "아니오");
+        c2.put("status", "CONFIRMED");
+        c2.put("quote", "해외에서 조회하는 일은 없어요");
+        a1.set("facts", facts);
+        return a1.toString();
+    }
+
+    @Test
+    void lowGradeNoReasonCaseJudgedAnswer() throws Exception {
+        String a1 = lowOnlyA1();
+        routes.put("A1_facts", r -> FakeProvider.ok(a1));
+        routes.put("A5_answer", r -> FakeProvider.ok(answerFromInput(r, true)));
+        Res r = create();
+        assertThat(r.status()).as(String.valueOf(r.body())).isEqualTo(200);
+        String id = r.body().get("case_id").asString();
+        List<String> asked = new ArrayList<>();
+        for (int i = 0; i < 8 && r.status() == 200 && "QUESTION".equals(r.body().get("outcome").asString()); i++) {
+            JsonNode q = r.body().get("question");
+            List<String> ch = Condition.strings(q.get("choices"));
+            String pick = ch.contains("아니오") ? "아니오" : ch.stream().filter(c -> c.startsWith("아니오")).findFirst().orElse(null) != null
+                    ? ch.stream().filter(c -> c.startsWith("아니오")).findFirst().get() : ch.stream().filter(c -> !c.equals("잘 모르겠음")).findFirst().orElseThrow();
+            asked.add(key(q) + "=" + pick);
+            r = post("/api/cases/" + id + "/answers", answer(q.get("turn_no").asInt(), pick));
+        }
+        System.out.println("S9 즉답 사안 질문: " + asked + " 결과: " + r.body().get("result"));
+        assertThat(r.status()).as(String.valueOf(r.body())).isEqualTo(200);
+        JsonNode res = r.body().get("result");
+        assertThat(res.get("exit_reasons")).as(res.get("exit_reasons").toString()).isEmpty();
+        assertThat(res.get("exit_type").asString()).isEqualTo("ANSWER");
+        assertThat(res.get("case_grade").asString()).isEqualTo("L");
+        assertThat(res.get("preliminary").asBoolean()).isFalse();
+        assertThat(res.get("conclusive").asBoolean()).isTrue();
+        assertThat(res.get("summary").isNull()).isTrue();
+        assertThat(r.body().get("state").asString()).isEqualTo("JUDGED");
+        assertThat(outcomes(id, "A7_summary")).isEmpty();   // 즉답이면 요지 LLM 없음
+        Map<String, Object> j = jdbc.sql("SELECT exit_type, review_bundle, case_grade FROM case_judgments WHERE case_id=?")
+                .param(id).query().singleRow();
+        assertThat(j.get("exit_type")).isEqualTo("ANSWER");
+        assertThat(j.get("review_bundle")).isNull();
+        assertThat(jdbc.sql("SELECT COUNT(*) FROM case_judgment_issues i JOIN case_judgments j ON j.judgment_id=i.judgment_id "
+                + "WHERE j.case_id=? AND i.visible_to_requester=1").param(id).query(Long.class).single()).isPositive();
+        Res rv = get("/api/cases/" + id + "/review");
+        assertThat(rv.status()).isEqualTo(409);
+        assertThat(rv.body().get("code").asString()).isEqualTo("NO_REVIEW");
     }
 }

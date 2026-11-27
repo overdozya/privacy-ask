@@ -69,6 +69,20 @@ public class CaseQueries {
                 st.turns(), turns.peek(st));
     }
 
+    // ───────── API 8 (S9) ─────────
+
+    /** 검토 요청 묶음: 판정 번호·상태·출구·사유 줄·묶음(사실·흐름별 쟁점·기준선·키·사유·남은 질문·A5 의견·요지). */
+    public record Review(String caseId, long judgmentId, String state, String exitType, String caseGrade,
+                         tools.jackson.databind.JsonNode exitReasons, tools.jackson.databind.JsonNode bundle) {}
+
+    public Review review(String requester, String caseId) {
+        CaseState st = turns.loadOwned(requester, caseId);
+        var s = turns.storedJudgment(caseId).filter(j -> j.bundle() != null)
+                .orElseThrow(() -> new FlowException(409, FlowException.NO_REVIEW, "이관 판정이 없음(" + st.caseRow().state() + ")",
+                        java.util.Map.of("case_id", caseId), null));
+        return new Review(caseId, s.judgmentId(), st.caseRow().state(), s.exitType(), s.caseGrade(), s.exitLines(), s.bundle());
+    }
+
     // ───────── API 5 ─────────
 
     public record Call(long callId, Integer stepSeq, String promptId, String promptVersion, String model,

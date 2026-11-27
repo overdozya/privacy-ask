@@ -72,6 +72,13 @@ public class CaseController {
         return queries.view(requester(who), id);
     }
 
+    /** API 8(S9): 검토 요청 묶음 — 이관으로 닫힌 사안의 판정 행 묶음(요지 포함). 이관 판정이 없으면 409 NO_REVIEW. */
+    @GetMapping("/{id}/review")
+    public CaseQueries.Review review(@RequestHeader(value = REQUESTER, required = false) String who,
+                                     @PathVariable String id) {
+        return queries.review(requester(who), id);
+    }
+
     /** API 5. */
     @GetMapping("/{id}/trace")
     public CaseQueries.Trace trace(@RequestHeader(value = REQUESTER, required = false) String who,

@@ -11,7 +11,7 @@ public class FlowException extends RuntimeException {
     public static final String CASE_NOT_FOUND = "CASE_NOT_FOUND", TURN_CONFLICT = "TURN_CONFLICT",
             NOT_ASKING = "NOT_ASKING", NOT_THE_QUESTION = "NOT_THE_QUESTION", INVALID_ANSWER = "INVALID_ANSWER",
             LLM_FAILED = "LLM_FAILED", TURN_TIMEOUT = "TURN_TIMEOUT", RECORD_REJECTED = "RECORD_REJECTED",
-            BAD_REQUEST = "BAD_REQUEST";
+            BAD_REQUEST = "BAD_REQUEST", NO_REVIEW = "NO_REVIEW";
 
     private final int status;
     private final String code;
