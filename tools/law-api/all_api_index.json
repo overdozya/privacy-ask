@@ -1,0 +1,983 @@
+{
+  "checked_at": "2026-10-30",
+  "source": "https://open.law.go.kr/LSO/openApi/guideList.do",
+  "site_displayed_count": 191,
+  "parsed_link_count": 195,
+  "apis": [
+    {
+      "guide_id": "lsEfYdListGuide",
+      "title": "현행법령(시행일) 목록 조회(국가법령정보센터 기준)",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsEfYdListGuide"
+    },
+    {
+      "guide_id": "lsEfYdInfoGuide",
+      "title": "현행법령(시행일) 본문 조회(국가법령정보센터 기준)",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsEfYdInfoGuide"
+    },
+    {
+      "guide_id": "lsNwListGuide",
+      "title": "현행법령(공포일) 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsNwListGuide"
+    },
+    {
+      "guide_id": "lsNwInfoGuide",
+      "title": "현행법령(공포일) 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsNwInfoGuide"
+    },
+    {
+      "guide_id": "lsHstListGuide",
+      "title": "법령 연혁 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsHstListGuide"
+    },
+    {
+      "guide_id": "lsHstInfoGuide",
+      "title": "법령 연혁 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsHstInfoGuide"
+    },
+    {
+      "guide_id": "lsEfYdJoListGuide",
+      "title": "현행법령(시행일) 본문 조항호목 조회(국가법령정보센터 기준)",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsEfYdJoListGuide"
+    },
+    {
+      "guide_id": "lsNwJoListGuide",
+      "title": "현행법령(공포일) 본문 조항호목 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsNwJoListGuide"
+    },
+    {
+      "guide_id": "lsEngListGuide",
+      "title": "영문 법령 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsEngListGuide"
+    },
+    {
+      "guide_id": "lsEngInfoGuide",
+      "title": "영문 법령 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsEngInfoGuide"
+    },
+    {
+      "guide_id": "lsChgListGuide",
+      "title": "법령 변경이력 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsChgListGuide"
+    },
+    {
+      "guide_id": "lsDayJoRvsListGuide",
+      "title": "일자별 조문 개정 이력 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsDayJoRvsListGuide"
+    },
+    {
+      "guide_id": "lsJoChgListGuide",
+      "title": "조문별 변경 이력 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsJoChgListGuide"
+    },
+    {
+      "guide_id": "lsOrdinConListGuide",
+      "title": "법령 기준 자치법규 연계 관련 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsOrdinConListGuide"
+    },
+    {
+      "guide_id": "lsOrdinConGuide",
+      "title": "법령-자치법규 연계현황 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsOrdinConGuide"
+    },
+    {
+      "guide_id": "lsDelegated",
+      "title": "위임법령 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsDelegated"
+    },
+    {
+      "guide_id": "lsStmdListGuide",
+      "title": "법령 체계도 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsStmdListGuide"
+    },
+    {
+      "guide_id": "lsStmdInfoGuide",
+      "title": "법령 체계도 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsStmdInfoGuide"
+    },
+    {
+      "guide_id": "oldAndNewListGuide",
+      "title": "신구법 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=oldAndNewListGuide"
+    },
+    {
+      "guide_id": "oldAndNewInfoGuide",
+      "title": "신구법 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=oldAndNewInfoGuide"
+    },
+    {
+      "guide_id": "thdCmpListGuide",
+      "title": "3단 비교 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=thdCmpListGuide"
+    },
+    {
+      "guide_id": "thdCmpInfoGuide",
+      "title": "3단 비교 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=thdCmpInfoGuide"
+    },
+    {
+      "guide_id": "lsAbrvListGuide",
+      "title": "법률명 약칭 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsAbrvListGuide"
+    },
+    {
+      "guide_id": "datDelHstGuide",
+      "title": "삭제 데이터 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=datDelHstGuide"
+    },
+    {
+      "guide_id": "oneViewListGuide",
+      "title": "한눈보기 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=oneViewListGuide"
+    },
+    {
+      "guide_id": "oneViewInfoGuide",
+      "title": "한눈보기 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=oneViewInfoGuide"
+    },
+    {
+      "guide_id": "admrulListGuide",
+      "title": "행정규칙 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=admrulListGuide"
+    },
+    {
+      "guide_id": "admrulInfoGuide",
+      "title": "행정규칙 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=admrulInfoGuide"
+    },
+    {
+      "guide_id": "admrulOldAndNewListGuide",
+      "title": "행정규칙 신구법 비교 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=admrulOldAndNewListGuide"
+    },
+    {
+      "guide_id": "admrulOldAndNewInfoGuide",
+      "title": "행정규칙 신구법 비교 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=admrulOldAndNewInfoGuide"
+    },
+    {
+      "guide_id": "ordinListGuide",
+      "title": "자치법규 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=ordinListGuide"
+    },
+    {
+      "guide_id": "ordinInfoGuide",
+      "title": "자치법규 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=ordinInfoGuide"
+    },
+    {
+      "guide_id": "ordinLsConListGuide",
+      "title": "자치법규 기준 법령 연계 관련 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=ordinLsConListGuide"
+    },
+    {
+      "guide_id": "precListGuide",
+      "title": "판례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=precListGuide"
+    },
+    {
+      "guide_id": "precInfoGuide",
+      "title": "판례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=precInfoGuide"
+    },
+    {
+      "guide_id": "detcListGuide",
+      "title": "헌재결정례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=detcListGuide"
+    },
+    {
+      "guide_id": "detcInfoGuide",
+      "title": "헌재결정례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=detcInfoGuide"
+    },
+    {
+      "guide_id": "expcListGuide",
+      "title": "법령해석례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=expcListGuide"
+    },
+    {
+      "guide_id": "expcInfoGuide",
+      "title": "법령해석례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=expcInfoGuide"
+    },
+    {
+      "guide_id": "deccListGuide",
+      "title": "행정심판례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=deccListGuide"
+    },
+    {
+      "guide_id": "deccInfoGuide",
+      "title": "행정심판례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=deccInfoGuide"
+    },
+    {
+      "guide_id": "ppcListGuide",
+      "title": "개인정보보호위원회 결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=ppcListGuide"
+    },
+    {
+      "guide_id": "ppcInfoGuide",
+      "title": "개인정보보호위원회 결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=ppcInfoGuide"
+    },
+    {
+      "guide_id": "eiacListGuide",
+      "title": "고용보험심사위원회 결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=eiacListGuide"
+    },
+    {
+      "guide_id": "eiacInfoGuide",
+      "title": "고용보험심사위원회 결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=eiacInfoGuide"
+    },
+    {
+      "guide_id": "ftcListGuide",
+      "title": "공정거래위원회 결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=ftcListGuide"
+    },
+    {
+      "guide_id": "ftcInfoGuide",
+      "title": "공정거래위원회 결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=ftcInfoGuide"
+    },
+    {
+      "guide_id": "acrListGuide",
+      "title": "국민권익위원회 결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=acrListGuide"
+    },
+    {
+      "guide_id": "acrInfoGuide",
+      "title": "국민권익위원회 결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=acrInfoGuide"
+    },
+    {
+      "guide_id": "fscListGuide",
+      "title": "금융위원회 결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=fscListGuide"
+    },
+    {
+      "guide_id": "fscInfoGuide",
+      "title": "금융위원회 결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=fscInfoGuide"
+    },
+    {
+      "guide_id": "nlrcListGuide",
+      "title": "노동위원회 결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=nlrcListGuide"
+    },
+    {
+      "guide_id": "nlrcInfoGuide",
+      "title": "노동위원회 결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=nlrcInfoGuide"
+    },
+    {
+      "guide_id": "kccListGuide",
+      "title": "방송미디어통신위원회결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=kccListGuide"
+    },
+    {
+      "guide_id": "kccInfoGuide",
+      "title": "방송미디어통신위원회결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=kccInfoGuide"
+    },
+    {
+      "guide_id": "iaciacListGuide",
+      "title": "산업재해보상보험재심사위원회결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=iaciacListGuide"
+    },
+    {
+      "guide_id": "iaciacInfoGuide",
+      "title": "산업재해보상보험재심사위원회결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=iaciacInfoGuide"
+    },
+    {
+      "guide_id": "ocltListGuide",
+      "title": "중앙토지수용위원회 결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=ocltListGuide"
+    },
+    {
+      "guide_id": "ocltInfoGuide",
+      "title": "중앙토지수용위원회 결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=ocltInfoGuide"
+    },
+    {
+      "guide_id": "eccListGuide",
+      "title": "중앙환경분쟁조정위원회 결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=eccListGuide"
+    },
+    {
+      "guide_id": "eccInfoGuide",
+      "title": "중앙환경분쟁조정위원회 결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=eccInfoGuide"
+    },
+    {
+      "guide_id": "sfcListGuide",
+      "title": "증권선물위원회 결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=sfcListGuide"
+    },
+    {
+      "guide_id": "sfcInfoGuide",
+      "title": "증권선물위원회 결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=sfcInfoGuide"
+    },
+    {
+      "guide_id": "nhrckListGuide",
+      "title": "국가인권위원회 결정문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=nhrckListGuide"
+    },
+    {
+      "guide_id": "nhrckInfoGuide",
+      "title": "국가인권위원회 결정문 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=nhrckInfoGuide"
+    },
+    {
+      "guide_id": "trtyListGuide",
+      "title": "조약 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=trtyListGuide"
+    },
+    {
+      "guide_id": "trtyInfoGuide",
+      "title": "조약 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=trtyInfoGuide"
+    },
+    {
+      "guide_id": "lsBylListGuide",
+      "title": "법령 별표ㆍ서식 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsBylListGuide"
+    },
+    {
+      "guide_id": "admrulBylListGuide",
+      "title": "행정규칙 별표ㆍ서식 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=admrulBylListGuide"
+    },
+    {
+      "guide_id": "ordinBylListGuide",
+      "title": "자치법규 별표ㆍ서식 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=ordinBylListGuide"
+    },
+    {
+      "guide_id": "schlPubRulListGuide",
+      "title": "학칙ㆍ공단ㆍ공공기관 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=schlPubRulListGuide"
+    },
+    {
+      "guide_id": "schlPubRulInfoGuide",
+      "title": "학칙ㆍ공단ㆍ공공기관 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=schlPubRulInfoGuide"
+    },
+    {
+      "guide_id": "lsTrmListGuide",
+      "title": "법령 용어 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsTrmListGuide"
+    },
+    {
+      "guide_id": "lsTrmInfoGuide",
+      "title": "법령 용어 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsTrmInfoGuide"
+    },
+    {
+      "guide_id": "mobLsListGuide",
+      "title": "법령 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobLsListGuide"
+    },
+    {
+      "guide_id": "mobLsInfoGuide",
+      "title": "법령 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobLsInfoGuide"
+    },
+    {
+      "guide_id": "mobAdmrulListguide",
+      "title": "행정규칙 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobAdmrulListguide"
+    },
+    {
+      "guide_id": "mobAdmrulInfoGuide",
+      "title": "행정규칙 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobAdmrulInfoGuide"
+    },
+    {
+      "guide_id": "mobOrdinListGuide",
+      "title": "자치법규 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobOrdinListGuide"
+    },
+    {
+      "guide_id": "mobOrdinInfoGuide",
+      "title": "자치법규 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobOrdinInfoGuide"
+    },
+    {
+      "guide_id": "mobPrecListGuide",
+      "title": "판례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobPrecListGuide"
+    },
+    {
+      "guide_id": "mobPrecInfoGuide",
+      "title": "판례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobPrecInfoGuide"
+    },
+    {
+      "guide_id": "mobDetcListGuide",
+      "title": "헌재결정례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobDetcListGuide"
+    },
+    {
+      "guide_id": "mobDetcInfoGuide",
+      "title": "헌재결정례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobDetcInfoGuide"
+    },
+    {
+      "guide_id": "mobExpcListGuide",
+      "title": "법령해석례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobExpcListGuide"
+    },
+    {
+      "guide_id": "mobExpcInfoGuide",
+      "title": "법령해석례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobExpcInfoGuide"
+    },
+    {
+      "guide_id": "mobDeccListGuide",
+      "title": "행정심판례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobDeccListGuide"
+    },
+    {
+      "guide_id": "mobDeccInfoGuide",
+      "title": "행정심판례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobDeccInfoGuide"
+    },
+    {
+      "guide_id": "mobTrtyListGuide",
+      "title": "조약 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobTrtyListGuide"
+    },
+    {
+      "guide_id": "mobTrtyInfoGuide",
+      "title": "조약 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobTrtyInfoGuide"
+    },
+    {
+      "guide_id": "mobLsBylListGuide",
+      "title": "법령 별표ㆍ서식 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobLsBylListGuide"
+    },
+    {
+      "guide_id": "mobAdmrulBylListGuide",
+      "title": "행정규칙 별표ㆍ서식 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobAdmrulBylListGuide"
+    },
+    {
+      "guide_id": "mobOrdinBylListGuide",
+      "title": "자치법규 별표ㆍ서식 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobOrdinBylListGuide"
+    },
+    {
+      "guide_id": "mobLsTrmListGuide",
+      "title": "법령 용어 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=mobLsTrmListGuide"
+    },
+    {
+      "guide_id": "custLsListGuide",
+      "title": "맞춤형 법령 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=custLsListGuide"
+    },
+    {
+      "guide_id": "custLsJoListGuide",
+      "title": "맞춤형 법령 조문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=custLsJoListGuide"
+    },
+    {
+      "guide_id": "custAdmrulListGuide",
+      "title": "맞춤형 행정규칙 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=custAdmrulListGuide"
+    },
+    {
+      "guide_id": "custAdmrulJoListGuide",
+      "title": "맞춤형 행정규칙 조문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=custAdmrulJoListGuide"
+    },
+    {
+      "guide_id": "custOrdinListGuide",
+      "title": "맞춤형 자치법규 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=custOrdinListGuide"
+    },
+    {
+      "guide_id": "custOrdinJoListGuide",
+      "title": "맞춤형 자치법규 조문 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=custOrdinJoListGuide"
+    },
+    {
+      "guide_id": "lstrmAIGuide",
+      "title": "법령용어 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lstrmAIGuide"
+    },
+    {
+      "guide_id": "dlytrmGuide",
+      "title": "일상용어 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=dlytrmGuide"
+    },
+    {
+      "guide_id": "lstrmRltGuide",
+      "title": "법령용어-일상용어 연계 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lstrmRltGuide"
+    },
+    {
+      "guide_id": "dlytrmRltGuide",
+      "title": "일상용어-법령용어 연계 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=dlytrmRltGuide"
+    },
+    {
+      "guide_id": "lstrmRltJoGuide",
+      "title": "법령용어-조문 연계 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lstrmRltJoGuide"
+    },
+    {
+      "guide_id": "joRltLstrmGuide",
+      "title": "조문-법령용어 연계 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=joRltLstrmGuide"
+    },
+    {
+      "guide_id": "lsRltGuide",
+      "title": "관련법령 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=lsRltGuide"
+    },
+    {
+      "guide_id": "aiSearchGuide",
+      "title": "지능형 법령검색 시스템 검색 API 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=aiSearchGuide"
+    },
+    {
+      "guide_id": "aiRltLsGuide",
+      "title": "지능형 법령검색 시스템 연관법령 API 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=aiRltLsGuide"
+    },
+    {
+      "guide_id": "cgmExpcMoelListGuide",
+      "title": "고용노동부 법령해석 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMoelListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMoelInfoGuide",
+      "title": "고용노동부 법령해석 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMoelInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMolitListGuide",
+      "title": "국토교통부 법령해석 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMolitListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMolitInfoGuide",
+      "title": "국토교통부 법령해석 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMolitInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMoefListGuide",
+      "title": "재정경제부 법령해석 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMoefListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMofListGuide",
+      "title": "해양수산부 법령해석 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMofListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMofInfoGuide",
+      "title": "해양수산부 법령해석 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMofInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMoisListGuide",
+      "title": "행정안전부 법령해석 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMoisListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMoisInfoGuide",
+      "title": "행정안전부 법령해석 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMoisInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMeListGuide",
+      "title": "기후에너지환경부 법령해석 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMeListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMeInfoGuide",
+      "title": "기후에너지환경부 법령해석 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMeInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcKcsListGuide",
+      "title": "관세청 법령해석 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKcsListGuide"
+    },
+    {
+      "guide_id": "cgmExpcKcsInfoGuide",
+      "title": "관세청 법령해석 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKcsInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcNtsListGuide",
+      "title": "국세청 법령해석 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcNtsListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMoeListGuide",
+      "title": "교육부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMoeListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMoeInfoGuide",
+      "title": "교육부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMoeInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMsitListGuide",
+      "title": "과학기술정보통신부법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMsitListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMsitInfoGuide",
+      "title": "과학기술정보통신부법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMsitInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMpvaListGuide",
+      "title": "국가보훈부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMpvaListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMpvaInfoGuide",
+      "title": "국가보훈부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMpvaInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMndListGuide",
+      "title": "국방부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMndListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMndInfoGuide",
+      "title": "국방부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMndInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMafraListGuide",
+      "title": "농림축산식품부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMafraListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMafraInfoGuide",
+      "title": "농림축산식품부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMafraInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMcstListGuide",
+      "title": "문화체육관광부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMcstListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMcstInfoGuide",
+      "title": "문화체육관광부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMcstInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMojListGuide",
+      "title": "법무부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMojListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMojInfoGuide",
+      "title": "법무부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMojInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMohwListGuide",
+      "title": "보건복지부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMohwListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMohwInfoGuide",
+      "title": "보건복지부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMohwInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMotieListGuide",
+      "title": "산업통상부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMotieListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMotieInfoGuide",
+      "title": "산업통상부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMotieInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMogefListGuide",
+      "title": "성평등가족부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMogefListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMogefInfoGuide",
+      "title": "성평등가족부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMogefInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMofaListGuide",
+      "title": "외교부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMofaListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMofaInfoGuide",
+      "title": "외교부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMofaInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMssListGuide",
+      "title": "중소벤처기업부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMssListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMssInfoGuide",
+      "title": "중소벤처기업부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMssInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMouListGuide",
+      "title": "통일부 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMouListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMouInfoGuide",
+      "title": "통일부 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMouInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMolegListGuide",
+      "title": "법제처 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMolegListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMolegInfoGuide",
+      "title": "법제처 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMolegInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMfdsListGuide",
+      "title": "식품의약품안전처 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMfdsListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMfdsInfoGuide",
+      "title": "식품의약품안전처 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMfdsInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMpmListGuide",
+      "title": "인사혁신처 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMpmListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMpmInfoGuide",
+      "title": "인사혁신처 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMpmInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcKmaListGuide",
+      "title": "기상청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKmaListGuide"
+    },
+    {
+      "guide_id": "cgmExpcKmaInfoGuide",
+      "title": "기상청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKmaInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcKhsListGuide",
+      "title": "국가유산청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKhsListGuide"
+    },
+    {
+      "guide_id": "cgmExpcKhsInfoGuide",
+      "title": "국가유산청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKhsInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcRdaListGuide",
+      "title": "농촌진흥청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcRdaListGuide"
+    },
+    {
+      "guide_id": "cgmExpcRdaInfoGuide",
+      "title": "농촌진흥청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcRdaInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcNpaListGuide",
+      "title": "경찰청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcNpaListGuide"
+    },
+    {
+      "guide_id": "cgmExpcNpaInfoGuide",
+      "title": "경찰청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcNpaInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcDapaListGuide",
+      "title": "방위사업청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcDapaListGuide"
+    },
+    {
+      "guide_id": "cgmExpcDapaInfoGuide",
+      "title": "방위사업청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcDapaInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcMmaListGuide",
+      "title": "병무청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMmaListGuide"
+    },
+    {
+      "guide_id": "cgmExpcMmaInfoGuide",
+      "title": "병무청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcMmaInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcKfsListGuide",
+      "title": "산림청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKfsListGuide"
+    },
+    {
+      "guide_id": "cgmExpcKfsInfoGuide",
+      "title": "산림청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKfsInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcNfaListGuide",
+      "title": "소방청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcNfaListGuide"
+    },
+    {
+      "guide_id": "cgmExpcNfaInfoGuide",
+      "title": "소방청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcNfaInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcOkaListGuide",
+      "title": "재외동포청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcOkaListGuide"
+    },
+    {
+      "guide_id": "cgmExpcOkaInfoGuide",
+      "title": "재외동포청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcOkaInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcPpsListGuide",
+      "title": "조달청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcPpsListGuide"
+    },
+    {
+      "guide_id": "cgmExpcPpsInfoGuide",
+      "title": "조달청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcPpsInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcKdcaListGuide",
+      "title": "질병관리청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKdcaListGuide"
+    },
+    {
+      "guide_id": "cgmExpcKdcaInfoGuide",
+      "title": "질병관리청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKdcaInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcKostatListGuide",
+      "title": "국가데이터처 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKostatListGuide"
+    },
+    {
+      "guide_id": "cgmExpcKostatInfoGuide",
+      "title": "국가데이터처 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKostatInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcKipoListGuide",
+      "title": "지식재산처 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKipoListGuide"
+    },
+    {
+      "guide_id": "cgmExpcKipoInfoGuide",
+      "title": "지식재산처 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKipoInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcKcgListGuide",
+      "title": "해양경찰청 법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKcgListGuide"
+    },
+    {
+      "guide_id": "cgmExpcKcgInfoGuide",
+      "title": "해양경찰청 법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcKcgInfoGuide"
+    },
+    {
+      "guide_id": "cgmExpcNaaccListGuide",
+      "title": "행정중심복합도시건설청법령해석 목록",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcNaaccListGuide"
+    },
+    {
+      "guide_id": "cgmExpcNaaccInfoGuide",
+      "title": "행정중심복합도시건설청법령해석 본문",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=cgmExpcNaaccInfoGuide"
+    },
+    {
+      "guide_id": "specialDeccTtListGuide",
+      "title": "조세심판원특별행정심판례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=specialDeccTtListGuide"
+    },
+    {
+      "guide_id": "specialDeccTtInfoGuide",
+      "title": "조세심판원특별행정심판례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=specialDeccTtInfoGuide"
+    },
+    {
+      "guide_id": "specialDeccKmstListGuide",
+      "title": "해양안전심판원특별행정심판례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=specialDeccKmstListGuide"
+    },
+    {
+      "guide_id": "specialDeccKmstInfoGuide",
+      "title": "해양안전심판원특별행정심판례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=specialDeccKmstInfoGuide"
+    },
+    {
+      "guide_id": "specialDeccAcrListGuide",
+      "title": "국민권익위원회특별행정심판례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=specialDeccAcrListGuide"
+    },
+    {
+      "guide_id": "specialDeccAcrInfoGuide",
+      "title": "국민권익위원회특별행정심판례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=specialDeccAcrInfoGuide"
+    },
+    {
+      "guide_id": "specialDeccAdapListGuide",
+      "title": "인사혁신처 소청심사위원회특별행정심판재결례 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=specialDeccAdapListGuide"
+    },
+    {
+      "guide_id": "specialDeccAdapInfoGuide",
+      "title": "인사혁신처 소청심사위원회특별행정심판례 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=specialDeccAdapInfoGuide"
+    },
+    {
+      "guide_id": "baiPvcsListGuide",
+      "title": "감사원 사전컨설팅의견서 목록 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=baiPvcsListGuide"
+    },
+    {
+      "guide_id": "baiPvcsInfoGuide",
+      "title": "감사원 사전컨설팅의견서 본문 조회",
+      "guide_url": "https://open.law.go.kr/LSO/openApi/guideResult.do?htmlName=baiPvcsInfoGuide"
+    }
+  ]
+}
